@@ -4,6 +4,16 @@ AstroSorter - Main Application
 
 import os
 import sys
+
+# CRITICAL: Handle frozen exe path BEFORE any other imports
+# This must be at the very top to ensure customtkinter can be found
+if getattr(sys, 'frozen', False):
+    # Running as compiled exe - set up paths
+    os.environ['PATH'] = sys._MEIPASS + os.pathsep + os.environ.get('PATH', '')
+    # Add MEIPASS to path so imports work
+    if sys._MEIPASS not in sys.path:
+        sys.path.insert(0, sys._MEIPASS)
+
 import shutil
 import threading
 import json
@@ -14,11 +24,6 @@ from tkinter import ttk, filedialog, messagebox
 from datetime import datetime
 from typing import Optional, List
 from functools import partial
-
-# Handle frozen exe path BEFORE any other imports
-if getattr(sys, 'frozen', False):
-    # Running as compiled exe
-    os.chdir(sys._MEIPASS)
 
 import customtkinter as ctk
 from customtkinter import CTkImage
