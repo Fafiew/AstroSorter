@@ -485,62 +485,76 @@ class AstroSorterApp(ctk.CTk):
             card.winfo_children()[1].configure(text=str(count))
     
     def _show_settings(self):
-        card = ctk.CTkFrame(self.view_container, fg_color="#1f1f3d", corner_radius=20)
-        card.pack(fill="both", expand=True, padx=100, pady=30)
+        # Create scrollable settings container
+        scroll_frame = ctk.CTkScrollableFrame(self.view_container, fg_color="transparent")
+        scroll_frame.pack(fill="both", expand=True)
         
-        ctk.CTkLabel(card, text="⚙️ Settings", font=("Segoe UI", 20, "bold"), text_color="white").pack(anchor="w", padx=30, pady=(25, 20))
+        card = ctk.CTkFrame(scroll_frame, fg_color="#1f1f3d", corner_radius=20)
+        card.pack(fill="both", expand=True, padx=50, pady=30)
         
-        ctk.CTkLabel(card, text="Scanning", font=("Segoe UI", 14, "bold"), text_color="#00d9ff").pack(anchor="w", padx=30, pady=(15, 10))
+        # Use grid with column weight for scaling
+        card.grid_columnconfigure(0, weight=1)
+        
+        # Title
+        title = ctk.CTkLabel(card, text="⚙️ Settings", font=("Segoe UI", 20, "bold"), text_color="white")
+        title.grid(row=0, column=0, sticky="w", padx=30, pady=(25, 20))
+        
+        # Scanning section
+        scan_label = ctk.CTkLabel(card, text="Scanning", font=("Segoe UI", 14, "bold"), text_color="#00d9ff")
+        scan_label.grid(row=1, column=0, sticky="w", padx=30, pady=(15, 10))
         
         self.recursive_var = ctk.BooleanVar(value=self.settings['recursive'])
-        ctk.CTkCheckBox(card, text="Scan subfolders", variable=self.recursive_var,
-                       text_color="white", font=("Segoe UI", 12)).pack(anchor="w", padx=30)
+        scan_check = ctk.CTkCheckBox(card, text="Scan subfolders", variable=self.recursive_var,
+                       text_color="white", font=("Segoe UI", 12))
+        scan_check.grid(row=2, column=0, sticky="w", padx=30)
         
-        ctk.CTkLabel(card, text="Export", font=("Segoe UI", 14, "bold"), text_color="#00d9ff").pack(anchor="w", padx=30, pady=(20, 10))
+        # Export section
+        export_label = ctk.CTkLabel(card, text="Export", font=("Segoe UI", 14, "bold"), text_color="#00d9ff")
+        export_label.grid(row=3, column=0, sticky="w", padx=30, pady=(20, 10))
         
         self.method_var = ctk.StringVar(value=self.settings['export_method'])
-        ctk.CTkRadioButton(card, text="Copy files", variable=self.method_var, value="copy",
-                          text_color="white").pack(anchor="w", padx=30)
-        ctk.CTkRadioButton(card, text="Move files", variable=self.method_var, value="move",
-                          text_color="white").pack(anchor="w", padx=30)
+        copy_radio = ctk.CTkRadioButton(card, text="Copy files", variable=self.method_var, value="copy",
+                          text_color="white")
+        copy_radio.grid(row=4, column=0, sticky="w", padx=30)
+        
+        move_radio = ctk.CTkRadioButton(card, text="Move files", variable=self.method_var, value="move",
+                          text_color="white")
+        move_radio.grid(row=5, column=0, sticky="w", padx=30)
         
         self.json_var = ctk.BooleanVar(value=self.settings['export_json'])
-        ctk.CTkCheckBox(card, text="Export JSON", variable=self.json_var,
-                       text_color="white").pack(anchor="w", padx=30, pady=15)
+        json_check = ctk.CTkCheckBox(card, text="Export JSON", variable=self.json_var,
+                       text_color="white")
+        json_check.grid(row=6, column=0, sticky="w", padx=30, pady=15)
         
-        # Rename settings
-        ctk.CTkLabel(card, text="Rename", font=("Segoe UI", 14, "bold"), text_color="#00d9ff").pack(anchor="w", padx=30, pady=(20, 10))
+        # Rename section
+        rename_label = ctk.CTkLabel(card, text="Rename", font=("Segoe UI", 14, "bold"), text_color="#00d9ff")
+        rename_label.grid(row=7, column=0, sticky="w", padx=30, pady=(20, 10))
         
         self.rename_var = ctk.BooleanVar(value=self.settings['rename_enabled'])
         rename_check = ctk.CTkCheckBox(card, text="Enable rename", variable=self.rename_var,
                        text_color="white", font=("Segoe UI", 12))
-        rename_check.pack(anchor="w", padx=30)
+        rename_check.grid(row=8, column=0, sticky="w", padx=30)
         
-        # Tokens help text
-        ctk.CTkLabel(card, text="Available tokens: {type}, {exposure}, {iso}, {mean}, {#}",
-                    text_color="#a0a0a0", font=("Segoe UI", 10)).pack(anchor="w", padx=30, pady=(10, 0))
+        # Tokens help
+        tokens_label = ctk.CTkLabel(card, text="Available tokens: {type}, {exposure}, {iso}, {mean}, {#}",
+                    text_color="#a0a0a0", font=("Segoe UI", 10))
+        tokens_label.grid(row=9, column=0, sticky="w", padx=30, pady=(10, 0))
         
         # Example
-        ctk.CTkLabel(card, text="Examples: {type}_{#} → lights_1 | {type}_{exposure}s_{#} → lights_300s_1",
-                    text_color="#606080", font=("Segoe UI", 9)).pack(anchor="w", padx=30, pady=(2, 5))
+        example_label = ctk.CTkLabel(card, text="Examples: {type}_{#} → lights_1 | {type}_{exposure}s_{#} → lights_300s_1",
+                    text_color="#606080", font=("Segoe UI", 9))
+        example_label.grid(row=10, column=0, sticky="w", padx=30, pady=(2, 5))
         
-        # Pattern input
-        pattern_frame = ctk.CTkFrame(card, fg_color="transparent")
-        pattern_frame.pack(fill="x", padx=30, pady=5)
-        pattern_frame.grid_columnconfigure(0, weight=1)
-        
+        # Pattern input - full width
         self.rename_pattern_var = ctk.StringVar(value=self.settings.get('rename_pattern', '{type}_{#}'))
-        pattern_entry = ctk.CTkEntry(pattern_frame, textvariable=self.rename_pattern_var,
+        pattern_entry = ctk.CTkEntry(card, textvariable=self.rename_pattern_var,
                                      placeholder_text="{type}_{#}", fg_color="#16213e", border_color="#0f3460")
-        pattern_entry.grid(row=0, column=0, sticky="ew")
+        pattern_entry.grid(row=11, column=0, sticky="ew", padx=30, pady=5)
         
-        # Save button - scales with window
-        btn_frame = ctk.CTkFrame(card, fg_color="transparent")
-        btn_frame.pack(fill="x", padx=30, pady=30)
-        btn_frame.grid_columnconfigure(0, weight=1)
-        
-        ctk.CTkButton(btn_frame, text="Save", fg_color="#e94560", height=40,
-                     command=self._save_settings).grid(row=0, column=0, sticky="ew")
+        # Save button - full width
+        save_btn = ctk.CTkButton(card, text="Save", fg_color="#e94560", height=40,
+                     command=self._save_settings)
+        save_btn.grid(row=12, column=0, sticky="ew", padx=30, pady=30)
     
     def _save_settings(self):
         self.settings['recursive'] = self.recursive_var.get()
