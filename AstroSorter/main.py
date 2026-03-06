@@ -1,5 +1,5 @@
 """
-AstroSorter - Main Application v1.0.8
+AstroSorter - Main Application v1.1.2
 """
 
 import os
@@ -19,7 +19,7 @@ from PIL import Image as PILImage
 from AstroSorter.classifier import ImageMetadata, ImageType, classify_directory, get_summary
 
 
-VERSION = "1.0.8"
+VERSION = "1.1.2"
 
 
 class AstroSorterApp(ctk.CTk):
@@ -41,6 +41,11 @@ class AstroSorterApp(ctk.CTk):
         self.sort_col = "filename"
         self.sort_asc = True
         self.selected_image: Optional[ImageMetadata] = None
+        
+        # UI references
+        self.header_buttons = {}
+        self.file_scroll = None
+        self.type_cards = {}
         
         self.settings = {'recursive': True, 'export_method': 'copy', 'export_json': True}
         
@@ -258,26 +263,30 @@ class AstroSorterApp(ctk.CTk):
             self.type_cards[t] = card
             cards.grid_columnconfigure(i, weight=1)
         
-        # Table
+        # Table with headers
         table = ctk.CTkFrame(main, fg_color="#1f1f3d", corner_radius=12)
         table.grid(row=1, column=0, sticky="nsew", padx=(0, 10))
         
-        headers = ctk.CTkFrame(table, fg_color="#16213e", corner_radius=8)
-        headers.pack(fill="x", padx=10, pady=10)
+        # Headers frame - stored for updates
+        self.headers_frame = ctk.CTkFrame(table, fg_color="#16213e", corner_radius=8)
+        self.headers_frame.pack(fill="x", padx=10, pady=10)
         
+        # Create header buttons
+        self.header_buttons = {}
         cols = [("filename", "File", 180), ("type", "Type", 110), ("exposure", "Exp", 70), 
                 ("iso", "ISO", 50), ("camera", "Camera", 100), ("mean", "Mean", 70)]
         
         for col_id, col_name, width in cols:
-            arrow = " ▼" if self.sort_col == col_id else ""
-            color = "#00d9ff" if self.sort_col == col_id else "white"
-            ctk.CTkButton(headers, text=col_name + arrow, fg_color="transparent", hover_color="#1f1f3d",
-                         text_color=color, width=width, height=30, corner_radius=5, border_width=0,
+            btn = ctk.CTkButton(self.headers_frame, text=col_name, fg_color="transparent", hover_color="#1f1f3d",
+                         text_color="white", width=width, height=30, corner_radius=5, border_width=0,
                          font=("Segoe UI", 11, "bold"),
-                         command=partial(self.sort_files, col_id)).pack(side="left", padx=3)
+                         command=partial(self.sort_files, col_id))
+            btn.pack(side="left", padx=3)
+            self.header_buttons[col_id] = btn
         
-        scroll = ctk.CTkScrollableFrame(table, fg_color="transparent")
-        scroll.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+        # Scrollable frame for file list
+        self.file_scroll = ctk.CTkScrollableFrame(table, fg_color="transparent")
+        self.file_scroll.pack(fill="both", expand=True, padx=10, pady=(0, 10))
         
         # Preview panel
         preview = ctk.CTkFrame(main, fg_color="#1f1f3d", corner_radius=12)
@@ -291,12 +300,23 @@ class AstroSorterApp(ctk.CTk):
         self.preview_info = ctk.CTkLabel(preview, text="", text_color="#a0a0a0", font=("Segoe UI", 10), justify="left")
         self.preview_info.pack(pady=10)
         
-        # Store scroll frame reference
-        self.file_scroll = scroll
+        # Initial populate
+        self._update_headers()
         self._populate_file_list()
     
+    def _update_headers(self):
+        """Update header button colors and arrows"""
+        cols = [("filename", "File"), ("type", "Type"), ("exposure", "Exp"), 
+                ("iso", "ISO"), ("camera", "Camera"), ("mean", "Mean")]
+        
+        for col_id, col_name in cols:
+            if col_id in self.header_buttons:
+                arrow = " ▼" if self.sort_col == col_id else ""
+                color = "#00d9ff" if self.sort_col == col_id else "white"
+                self.header_buttons[col_id].configure(text=col_name + arrow, text_color=color)
+    
     def _populate_file_list(self):
-        if not hasattr(self, 'file_scroll'):
+        if not self.file_scroll:
             return
             
         for w in self.file_scroll.winfo_children():
@@ -352,9 +372,7 @@ class AstroSorterApp(ctk.CTk):
             ctk.CTkLabel(row, text=mean_text, text_color="#a0a0a0", width=70).pack(side="left")
         
         # Update counts
-        for t, card in self.type_cards.items():
-            count = sum(1 for r in self.results if r.classified_type == t)
-            card.winfo_children()[1].configure(text=str(count))
+        self._refresh_counts()
     
     def _show_preview(self, metadata: ImageMetadata):
         self.selected_image = metadata
@@ -384,11 +402,9 @@ class AstroSorterApp(ctk.CTk):
             self.sort_col = col
             self.sort_asc = True
         
-        # Refresh the list immediately
+        # Update headers and list only
+        self._update_headers()
         self._populate_file_list()
-        
-        # Also refresh the header to show arrow
-        self._show_files()
     
     def change_type(self, metadata: ImageMetadata, new_type: str):
         type_map = {"Lights": ImageType.LIGHT, "Darks": ImageType.DARK, 
