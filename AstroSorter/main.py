@@ -6,6 +6,7 @@ import os
 import shutil
 import threading
 import json
+import urllib.request
 from pathlib import Path
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
@@ -166,8 +167,13 @@ class AstroSorterApp(ctk.CTk):
         ctk.CTkLabel(version_frame, text=f"Current Version: {VERSION}",
                     text_color="white", font=("Segoe UI", 14)).pack(pady=15, padx=30)
         
-        ctk.CTkLabel(version_frame, text=f"Latest: {VERSION}", 
-                    text_color="#00ff88", font=("Segoe UI", 12)).pack(pady=(0, 15), padx=30)
+        # Latest version (fetched from GitHub)
+        self.latest_version_label = ctk.CTkLabel(version_frame, text="Checking for updates...", 
+                    text_color="#a0a0a0", font=("Segoe UI", 12))
+        self.latest_version_label.pack(pady=(0, 15), padx=30)
+        
+        # Check for updates in background
+        threading.Thread(target=self._check_for_updates, daemon=True).start()
         
         # Current folder
         folder_frame = ctk.CTkFrame(card, fg_color="transparent")
@@ -426,6 +432,44 @@ class AstroSorterApp(ctk.CTk):
                    "Flats": ImageType.FLAT, "Biases": ImageType.BIAS, "Unknown": ImageType.UNKNOWN}
         metadata.classified_type = type_map.get(new_type, ImageType.UNKNOWN)
         self._refresh_counts()
+    
+    def _check_for_updates(self):
+        """Check for latest version from GitHub"""
+        try:
+            # Fetch the latest version from GitHub tags
+            url = "https://api.github.com/repos/Fafiew/AstroSorter/tags"
+            req = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json"})
+            with urllib.request.urlopen(req, timeout=10) as response:
+                data = json.loads(response.read().decode())
+                if data:
+                    latest = data[0]["name"].lstrip("v")
+                    
+                    # Update label in main thread
+                    def update_label():
+                        if hasattr(self, 'latest_version_label'):
+                            if latest == VERSION:
+                                self.latest_version_label.configure(
+                                    text=f"Latest: {latest} (up to date)",
+                                    text_color="#00ff88"
+                                )
+                            else:
+                                self.latest_version_label.configure(
+                                    text=f"Latest: {latest} (update available)",
+                                    text_color="#ffaa00"
+                                )
+                    self.after(0, update_label)
+                    return
+        except Exception:
+            pass
+        
+        # Fallback - show error or use current version
+        def update_error():
+            if hasattr(self, 'latest_version_label'):
+                self.latest_version_label.configure(
+                    text=f"Latest: {VERSION}",
+                    text_color="#a0a0a0"
+                )
+        self.after(0, update_error)
     
     def _refresh_counts(self):
         for t, card in self.type_cards.items():

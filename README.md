@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![AstroSorter Banner](https://img.shields.io/badge/AstroSorter-v1.2.7-00d9ff?style=for-the-badge&logo=python&logoColor=white)
+![AstroSorter Banner](https://img.shields.io/badge/AstroSorter-v1.2.8-00d9ff?style=for-the-badge&logo=python&logoColor=white)
 [![License: MIT](https://img.shields.io/badge/License-MIT-orange.svg)](https://opensource.org/licenses/MIT)
 [![Python Version](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://www.python.org/)
 [![Platform: Windows](https://img.shields.io/badge/Platform-Windows-lightgrey.svg)](https://www.microsoft.com/)
