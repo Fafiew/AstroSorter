@@ -281,16 +281,14 @@ class AstroSorterApp(ctk.CTk):
             self.file_tree.heading(col_id, text=col_name, command=partial(self.sort_files, col_id))
             self.file_tree.column(col_id, width=width, minwidth=40, anchor="w")
         
-        # Scrollbars - only show when needed
+        # Scrollbars - always visible for simplicity
         vsb = ttk.Scrollbar(table, orient="vertical", command=self.file_tree.yview)
         hsb = ttk.Scrollbar(table, orient="horizontal", command=self.file_tree.xview)
-        self.file_tree.configure(yscrollcommand=self._on_vsb, xscrollcommand=self._on_hsb)
-        
-        # Store scrollbar references
-        self._vsb = vsb
-        self._hsb = hsb
+        self.file_tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
         
         self.file_tree.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
+        vsb.grid(row=0, column=1, sticky="ns", pady=10)
+        hsb.grid(row=1, column=0, sticky="ew", padx=10)
         
         table.grid_rowconfigure(0, weight=1)
         table.grid_columnconfigure(0, weight=1)
@@ -300,22 +298,6 @@ class AstroSorterApp(ctk.CTk):
         
         # Store column widths for sorting updates
         self._col_widths = {col: w for col, _, w in col_configs}
-    
-    def _on_vsb(self, *args):
-        """Vertical scrollbar - show/hide based on need"""
-        if self.file_tree.yview() != (0.0, 1.0):
-            self._vsb.grid(row=0, column=1, sticky="ns", pady=10)
-        else:
-            self._vsb.grid_remove()
-        self.file_tree.yview(*args)
-    
-    def _on_hsb(self, *args):
-        """Horizontal scrollbar - show/hide based on need"""
-        if self.file_tree.xview() != (0.0, 1.0):
-            self._hsb.grid(row=1, column=0, sticky="ew", padx=10)
-        else:
-            self._hsb.grid_remove()
-        self.file_tree.xview(*args)
         
         # Preview panel
         preview = ctk.CTkFrame(main, fg_color="#1f1f3d", corner_radius=12)
