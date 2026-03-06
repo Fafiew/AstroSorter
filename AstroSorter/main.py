@@ -45,7 +45,8 @@ class AstroSorterApp(ctk.CTk):
         self.file_scroll = None
         self.type_cards = {}
         
-        self.settings = {'recursive': True, 'export_method': 'copy', 'export_json': True}
+        self.settings = {'recursive': True, 'export_method': 'copy', 'export_json': True,
+                        'rename_enabled': False, 'rename_pattern': 'type_#'}
         
         self._setup_ui()
         self._center_window()
@@ -415,6 +416,22 @@ class AstroSorterApp(ctk.CTk):
         ctk.CTkCheckBox(card, text="Export JSON", variable=self.json_var,
                        text_color="white").pack(anchor="w", padx=30, pady=15)
         
+        # Rename settings
+        ctk.CTkLabel(card, text="Rename", font=("Segoe UI", 14, "bold"), text_color="#00d9ff").pack(anchor="w", padx=30, pady=(20, 10))
+        
+        self.rename_var = ctk.BooleanVar(value=self.settings['rename_enabled'])
+        rename_check = ctk.CTkCheckBox(card, text="Enable rename", variable=self.rename_var,
+                       text_color="white", font=("Segoe UI", 12))
+        rename_check.pack(anchor="w", padx=30)
+        
+        ctk.CTkLabel(card, text="Pattern (type = Lights/Darks/Flats/Biases, # = counter):",
+                    text_color="#a0a0a0", font=("Segoe UI", 10)).pack(anchor="w", padx=30, pady=(10, 0))
+        
+        self.rename_pattern_var = ctk.StringVar(value=self.settings['rename_pattern'])
+        pattern_entry = ctk.CTkEntry(card, textvariable=self.rename_pattern_var, width=200,
+                                     placeholder_text="type_#", fg_color="#16213e", border_color="#0f3460")
+        pattern_entry.pack(anchor="w", padx=30, pady=5)
+        
         ctk.CTkButton(card, text="Save", fg_color="#e94560", height=40,
                      command=self._save_settings).pack(pady=30)
     
@@ -422,6 +439,8 @@ class AstroSorterApp(ctk.CTk):
         self.settings['recursive'] = self.recursive_var.get()
         self.settings['export_method'] = self.method_var.get()
         self.settings['export_json'] = self.json_var.get()
+        self.settings['rename_enabled'] = self.rename_var.get()
+        self.settings['rename_pattern'] = self.rename_pattern_var.get()
         messagebox.showinfo("Settings", "Saved!")
     
     def _center_window(self):
@@ -492,13 +511,38 @@ class AstroSorterApp(ctk.CTk):
             folders[t] = os.path.join(dest, t.value)
             os.makedirs(folders[t], exist_ok=True)
         
+        # Counters for rename
+        counters = {t: 1 for t in ImageType}
+        
         for m in self.results:
             dst = folders[m.classified_type]
-            dst_path = os.path.join(dst, m.filename)
             
+            # Generate filename (rename or original)
+            if self.settings['rename_enabled']:
+                pattern = self.settings['rename_pattern']
+                type_name = m.classified_type.value.lower()
+                counter = counters[m.classified_type]
+                
+                # Replace "type" with actual type and "#" with counter
+                new_name = pattern.replace('type', type_name).replace('#', str(counter))
+                ext = Path(m.filename).suffix
+                dst_path = os.path.join(dst, new_name + ext)
+                counters[m.classified_type] += 1
+            else:
+                dst_path = os.path.join(dst, m.filename)
+            
+            # Handle filename conflicts
             counter = 1
+            original_dst = dst_path
             while os.path.exists(dst_path):
-                dst_path = os.path.join(dst, f"{Path(m.filename).stem}_{counter}{Path(m.filename).suffix}")
+                if self.settings['rename_enabled']:
+                    base = Path(original_dst).stem
+                    ext = Path(original_dst).suffix
+                    dst_path = os.path.join(dst, f"{base}_{counter}{ext}")
+                else:
+                    base = Path(m.filename).stem
+                    ext = Path(m.filename).suffix
+                    dst_path = os.path.join(dst, f"{base}_{counter}{ext}")
                 counter += 1
             
             try:
