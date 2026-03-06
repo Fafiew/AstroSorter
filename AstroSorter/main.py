@@ -1,5 +1,5 @@
 """
-AstroSorter - Main Application v1.0.7
+AstroSorter - Main Application v1.0.8
 """
 
 import os
@@ -19,7 +19,7 @@ from PIL import Image as PILImage
 from AstroSorter.classifier import ImageMetadata, ImageType, classify_directory, get_summary
 
 
-VERSION = "1.0.7"
+VERSION = "1.0.8"
 
 
 class AstroSorterApp(ctk.CTk):
@@ -125,7 +125,6 @@ class AstroSorterApp(ctk.CTk):
         main = ctk.CTkFrame(self.view_container, fg_color="transparent")
         main.pack(fill="both", expand=True)
         
-        # Top bar
         top = ctk.CTkFrame(main, fg_color="#1f1f3d", corner_radius=10)
         top.pack(fill="x", pady=(0, 10))
         
@@ -139,7 +138,6 @@ class AstroSorterApp(ctk.CTk):
         ctk.CTkButton(top, text="📂 Browse", fg_color="#e94560", hover_color="#ff6b8a",
                       command=self.browse_folder).pack(side="right", padx=10, pady=10)
         
-        # File list
         list_frame = ctk.CTkFrame(main, fg_color="#1f1f3d", corner_radius=10)
         list_frame.pack(fill="both", expand=True)
         
@@ -203,12 +201,10 @@ class AstroSorterApp(ctk.CTk):
         self._show_home()
     
     def _preview_image(self, filepath: str):
-        """Load image for preview - supports RAW formats"""
         img = None
         ext = Path(filepath).suffix.lower()
         
         try:
-            # Try RAW formats first with rawpy
             if ext in {'.cr2', '.cr3', '.nef', '.arw', '.raf', '.dng', '.orf', '.rw2', '.pef'}:
                 try:
                     import rawpy
@@ -218,7 +214,6 @@ class AstroSorterApp(ctk.CTk):
                 except:
                     pass
             
-            # Fallback to PIL
             if img is None:
                 img = PILImage.open(filepath)
                 
@@ -237,7 +232,7 @@ class AstroSorterApp(ctk.CTk):
             ctk.CTkButton(card, text="Browse Folder", fg_color="#e94560", command=self.browse_folder).pack(pady=20)
             return
         
-        # Split view: table (left) + preview (right)
+        # Split view
         main = ctk.CTkFrame(self.view_container, fg_color="transparent")
         main.pack(fill="both", expand=True)
         main.grid_columnconfigure(0, weight=3)
@@ -267,7 +262,6 @@ class AstroSorterApp(ctk.CTk):
         table = ctk.CTkFrame(main, fg_color="#1f1f3d", corner_radius=12)
         table.grid(row=1, column=0, sticky="nsew", padx=(0, 10))
         
-        # Headers
         headers = ctk.CTkFrame(table, fg_color="#16213e", corner_radius=8)
         headers.pack(fill="x", padx=10, pady=10)
         
@@ -276,9 +270,9 @@ class AstroSorterApp(ctk.CTk):
         
         for col_id, col_name, width in cols:
             arrow = " ▼" if self.sort_col == col_id else ""
+            color = "#00d9ff" if self.sort_col == col_id else "white"
             ctk.CTkButton(headers, text=col_name + arrow, fg_color="transparent", hover_color="#1f1f3d",
-                         text_color="#00d9ff" if self.sort_col == col_id else "white", 
-                         width=width, height=30, corner_radius=5, border_width=0,
+                         text_color=color, width=width, height=30, corner_radius=5, border_width=0,
                          font=("Segoe UI", 11, "bold"),
                          command=partial(self.sort_files, col_id)).pack(side="left", padx=3)
         
@@ -297,10 +291,15 @@ class AstroSorterApp(ctk.CTk):
         self.preview_info = ctk.CTkLabel(preview, text="", text_color="#a0a0a0", font=("Segoe UI", 10), justify="left")
         self.preview_info.pack(pady=10)
         
-        self._populate_file_list(scroll)
+        # Store scroll frame reference
+        self.file_scroll = scroll
+        self._populate_file_list()
     
-    def _populate_file_list(self, parent):
-        for w in parent.winfo_children():
+    def _populate_file_list(self):
+        if not hasattr(self, 'file_scroll'):
+            return
+            
+        for w in self.file_scroll.winfo_children():
             w.destroy()
         
         # Sort
@@ -324,20 +323,17 @@ class AstroSorterApp(ctk.CTk):
         type_values = ["Lights", "Darks", "Flats", "Biases", "Unknown"]
         
         for idx, m in enumerate(sorted_results):
-            row = ctk.CTkFrame(parent, fg_color="#1a1a2e" if idx % 2 == 0 else "#1f1f3d", corner_radius=6)
+            row = ctk.CTkFrame(self.file_scroll, fg_color="#1a1a2e" if idx % 2 == 0 else "#1f1f3d", corner_radius=6)
             row.pack(fill="x", pady=2)
             
-            # Thumbnail click
             thumb = ctk.CTkLabel(row, text="🖼", font=("Segoe UI", 14), cursor="hand2", text_color="#00d9ff")
             thumb.pack(side="left", padx=(8, 0))
             thumb.bind("<Button-1>", lambda e, mm=m: self._show_preview(mm))
             
-            # Filename
             fname = m.filename[:25] + ("..." if len(m.filename) > 25 else "")
             ctk.CTkLabel(row, text=fname, text_color="white", width=150, anchor="w", 
                         font=("Segoe UI", 10)).pack(side="left", padx=5)
             
-            # Type dropdown
             current_type = m.classified_type.value if m.classified_type else "Unknown"
             var = ctk.StringVar(value=current_type)
             
@@ -347,13 +343,12 @@ class AstroSorterApp(ctk.CTk):
                             command=lambda v, mm=m: self.change_type(mm, v))
             dropdown.pack(side="left", padx=3)
             
-            # Columns
-            exp_text = f"{m.exposure_time:.3f}s" if m.exposure_time else "-"
+            exp_text = f"{m.exposure_time:.1f}s" if m.exposure_time else "-"
             ctk.CTkLabel(row, text=exp_text, text_color="#a0a0a0", width=70).pack(side="left")
             ctk.CTkLabel(row, text=str(m.iso) if m.iso else "-", text_color="#a0a0a0", width=50).pack(side="left")
             cam = (m.camera_model[:12] + "..") if m.camera_model and len(m.camera_model) > 12 else (m.camera_model or "-")
             ctk.CTkLabel(row, text=cam, text_color="#a0a0a0", width=100).pack(side="left")
-            mean_text = f"{m.mean:.0f}" if m.mean else "-"
+            mean_text = f"{m.mean:.1f}" if m.mean else "-"
             ctk.CTkLabel(row, text=mean_text, text_color="#a0a0a0", width=70).pack(side="left")
         
         # Update counts
@@ -362,7 +357,6 @@ class AstroSorterApp(ctk.CTk):
             card.winfo_children()[1].configure(text=str(count))
     
     def _show_preview(self, metadata: ImageMetadata):
-        """Show image preview in the panel"""
         self.selected_image = metadata
         
         try:
@@ -374,12 +368,11 @@ class AstroSorterApp(ctk.CTk):
                 self.preview_label.configure(image=ctk_img, text="")
                 self.preview_label.image = ctk_img
                 
-                # Update info
                 info = f"File: {metadata.filename}\n"
                 info += f"Type: {metadata.classified_type.value}\n"
                 info += f"Exp: {metadata.exposure_time if metadata.exposure_time else '-'}s\n"
                 info += f"ISO: {metadata.iso if metadata.iso else '-'}\n"
-                info += f"Mean: {metadata.mean:.0f if metadata.mean else '-'}"
+                info += f"Mean: {metadata.mean if metadata.mean else '-'}"
                 self.preview_info.configure(text=info)
         except Exception as e:
             self.preview_label.configure(text=f"Cannot load:\n{str(e)[:50]}", image=None)
@@ -391,15 +384,11 @@ class AstroSorterApp(ctk.CTk):
             self.sort_col = col
             self.sort_asc = True
         
-        # Find the scrollable frame and refresh
-        for w in self.view_container.winfo_children():
-            if isinstance(w, ctk.CTkFrame):
-                for c in w.winfo_children():
-                    if isinstance(c, ctk.CTkFrame):
-                        for sc in c.winfo_children():
-                            if isinstance(sc, ctk.CTkScrollableFrame):
-                                self._populate_file_list(sc)
-                                return
+        # Refresh the list immediately
+        self._populate_file_list()
+        
+        # Also refresh the header to show arrow
+        self._show_files()
     
     def change_type(self, metadata: ImageMetadata, new_type: str):
         type_map = {"Lights": ImageType.LIGHT, "Darks": ImageType.DARK, 

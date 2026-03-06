@@ -1,5 +1,5 @@
 """
-AstroSorter - Classifier with mean-based light/dark detection
+AstroSorter - Classifier with correct astrophotography logic
 """
 
 import os
@@ -176,96 +176,133 @@ def classify_directory(directory: str, recursive: bool = True, progress_callback
     # Group by ISO
     iso_groups: Dict[int, List[ImageMetadata]] = {}
     for m in results:
-        if m.iso:
-            if m.iso not in iso_groups:
-                iso_groups[m.iso] = []
-            iso_groups[m.iso].append(m)
-        else:
-            if None not in iso_groups:
-                iso_groups[None] = []
-            iso_groups[None].append(m)
+        iso_key = m.iso if m.iso else 0
+        if iso_key not in iso_groups:
+            iso_groups[iso_key] = []
+        iso_groups[iso_key].append(m)
     
     # Classify each ISO group
-    for iso, images in iso_groups.items():
-        if len(images) < 3:
+    for iso_key, images in iso_groups.items():
+        if len(images) < 2:
             for m in images:
                 m.classified_type = ImageType.UNKNOWN
             continue
         
-        # Get exposure groups
-        exp_map: Dict[float, List[ImageMetadata]] = {}
+        # Group by exposure time
+        exp_groups: Dict[float, List[ImageMetadata]] = {}
         for m in images:
             if m.exposure_time:
-                exp = round(m.exposure_time, 2)
-                if exp not in exp_map:
-                    exp_map[exp] = []
-                exp_map[exp].append(m)
+                # Round to 1 decimal for grouping
+                exp = round(m.exposure_time, 1)
+                if exp not in exp_groups:
+                    exp_groups[exp] = []
+                exp_groups[exp].append(m)
         
-        if not exp_map:
-            _classify_by_mean(images)
+        if not exp_groups:
+            # No exposure data - use mean only
+            _classify_by_mean_only(images)
             continue
         
-        # Calculate mean for each exposure group
-        exp_means = {}
-        for exp, group in exp_map.items():
-            means = [g.mean for g in group if g.mean is not None]
-            if means:
-                exp_means[exp] = sum(means) / len(means)
+        # Separate bias (very short exposure)
+        bias_exps = [e for e in exp_groups.keys() if e < 0.1]
+        other_exps = [e for e in exp_groups.keys() if e >= 0.1]
         
-        if not exp_means:
-            _classify_by_mean(images)
-            continue
+        # Mark bias frames
+        for exp in bias_exps:
+            for m in exp_groups[exp]:
+                m.classified_type = ImageType.BIAS
+                m.confidence = 0.95
         
-        # Find exposure with highest mean - that's LIGHTS
-        # Rule: lights have HIGHER mean, darks have LOWER mean (<5000)
-        max_mean_exp = max(exp_means.items(), key=lambda x: x[1] or 0)[0]
-        max_mean_val = exp_means.get(max_mean_exp, 0)
-        
-        # Classify based on mean only - this is the KEY rule
-        # HIGHER mean = LIGHTS, LOWER mean = DARKS
-        sorted_exps = sorted(exp_means.items(), key=lambda x: x[1] or 0, reverse=True)
-        
-        if sorted_exps:
-            # Highest mean = LIGHTS
-            light_exp = sorted_exps[0][0]
-            light_mean = sorted_exps[0][1]
+        # For remaining exposures, classify by exposure + mean
+        if other_exps:
+            # Find the most common long exposure
+            long_exps = [e for e in other_exps if e >= 10]
+            short_exps = [e for e in other_exps if e < 10]
             
-            # Find minimum mean for darks
-            min_exp = min(exp_means.keys())
-            min_mean = exp_means[min_exp]
+            # Group exposures by similar times (within 10% tolerance)
+            exposure_clusters = _cluster_exposures(other_exps)
             
-            for exp, group in exp_map.items():
-                avg_mean = exp_means.get(exp)
+            for cluster in exposure_clusters:
+                # Get all images in this cluster
+                cluster_images = []
+                for exp in cluster:
+                    cluster_images.extend(exp_groups[exp])
                 
-                if exp == light_exp or (avg_mean and avg_mean >= 5000):
-                    # Highest mean = LIGHTS
-                    for g in group:
-                        g.classified_type = ImageType.LIGHT
-                        g.confidence = 0.9
-                elif exp < 0.01:
-                    # Very short = BIAS
-                    for g in group:
-                        g.classified_type = ImageType.BIAS
-                        g.confidence = 0.9
-                elif 0.01 <= exp < 5:
-                    # Medium = FLATS
-                    for g in group:
-                        g.classified_type = ImageType.FLAT
-                        g.confidence = 0.7
-                elif avg_mean and avg_mean < 5000:
-                    # Lower mean = DARKS
-                    for g in group:
-                        g.classified_type = ImageType.DARK
-                        g.confidence = 0.85
+                if not cluster_images:
+                    continue
+                
+                # Calculate mean for each exposure in cluster
+                exp_means = {}
+                for exp in cluster:
+                    means = [m.mean for m in exp_groups[exp] if m.mean is not None]
+                    if means:
+                        exp_means[exp] = sum(means) / len(means)
+                
+                if not exp_means:
+                    for m in cluster_images:
+                        m.classified_type = ImageType.UNKNOWN
+                    continue
+                
+                # Find min and max mean
+                min_exp = min(exp_means.keys(), key=lambda x: exp_means[x])
+                max_exp = max(exp_means.keys(), key=lambda x: exp_means[x])
+                
+                # Higher mean = Lights, Lower mean = Darks
+                # Same exposure group: compare means to determine light vs dark
+                
+                # If we have different exposures in cluster:
+                # - longest = lights, shorter = darks/flats
+                # BUT also check mean: lights should have HIGHER mean
+                
+                if len(cluster) > 1:
+                    # Multiple exposures in cluster
+                    # Sort by exposure time
+                    sorted_exp = sorted(cluster)
+                    
+                    for exp in sorted_exp:
+                        for m in exp_groups[exp]:
+                            if exp == sorted_exp[-1]:
+                                # Longest exposure = Lights
+                                m.classified_type = ImageType.LIGHT
+                                m.confidence = 0.9
+                            else:
+                                # Shorter exposure = Darks (same target)
+                                m.classified_type = ImageType.DARK
+                                m.confidence = 0.85
                 else:
-                    for g in group:
-                        g.classified_type = ImageType.UNKNOWN
+                    # Single exposure in cluster - use mean to separate light/dark
+                    # This shouldn't happen often
+                    for exp in cluster:
+                        for m in exp_groups[exp]:
+                            m.classified_type = ImageType.LIGHT
+                            m.confidence = 0.7
     
     return results
 
 
-def _classify_by_mean(images: List[ImageMetadata]):
-    """Classify by mean brightness when no exposure data"""
+def _cluster_exposures(exposures: List[float]) -> List[List[float]]:
+    """Group exposures that are similar (within 10% of each other)"""
+    if not exposures:
+        return []
+    
+    exposures = sorted(set(exposures))
+    clusters = []
+    current_cluster = [exposures[0]]
+    
+    for i in range(1, len(exposures)):
+        # Check if current exposure is within 10% of previous
+        if exposures[i] <= current_cluster[-1] * 1.1:
+            current_cluster.append(exposures[i])
+        else:
+            clusters.append(current_cluster)
+            current_cluster = [exposures[i]]
+    
+    clusters.append(current_cluster)
+    return clusters
+
+
+def _classify_by_mean_only(images: List[ImageMetadata]):
+    """Classify by mean when no exposure data"""
     means = [m.mean for m in images if m.mean is not None]
     if not means:
         for m in images:
@@ -274,14 +311,15 @@ def _classify_by_mean(images: List[ImageMetadata]):
     
     avg_mean = sum(means) / len(means)
     
+    # Higher than average = Light, Lower = Dark
     for m in images:
         if m.mean:
-            if m.mean >= 5000:
+            if m.mean >= avg_mean:
                 m.classified_type = ImageType.LIGHT
-                m.confidence = 0.6
+                m.confidence = 0.5
             else:
                 m.classified_type = ImageType.DARK
-                m.confidence = 0.6
+                m.confidence = 0.5
         else:
             m.classified_type = ImageType.UNKNOWN
 
