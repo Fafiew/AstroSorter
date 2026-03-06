@@ -523,7 +523,10 @@ class StatusBar(ctk.CTkFrame):
     
     def hide_progress(self):
         """Hide progress bar"""
-        self.progress.pack_forgets()
+        try:
+            self.progress.pack_forget()
+        except:
+            pass
     
     def set_progress(self, value: float):
         """Set progress value (0-1)"""

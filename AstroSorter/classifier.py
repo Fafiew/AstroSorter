@@ -346,7 +346,7 @@ class AstroClassifier:
             pass
     
     def _classify_from_metadata(self, metadata: ImageMetadata):
-        """Classify image based on metadata"""
+        """Classify image based on metadata - improved for SeeStar/S50 and lucky imaging"""
         
         # Priority 1: Explicit IMAGETYP header (most reliable for FITS)
         if metadata.imagetyp:
@@ -373,51 +373,53 @@ class AstroClassifier:
                 metadata.confidence = 1.0
                 return
         
-        # Priority 2: Check object name for lights
-        if metadata.object_name and metadata.object_name.strip():
-            # Has object name, likely a light
-            if metadata.exposure_time and metadata.exposure_time >= self.LIGHT_MIN_EXPOSURE:
-                metadata.classified_type = ImageType.LIGHT
+        # Priority 2: Exposure time based classification
+        # SeeStar S30/S50 typically uses 10-15s exposures
+        # Lucky imaging can use various exposure times
+        if metadata.exposure_time is not None:
+            exposure = metadata.exposure_time
+            
+            # BIAS: Very short exposure (typically < 0.001s)
+            if exposure <= 0.001:
+                metadata.classified_type = ImageType.BIAS
                 metadata.confidence = 0.9
                 return
-        
-        # Priority 3: Exposure time based classification
-        if metadata.exposure_time is not None:
             
-            # BIAS: Very short exposure, typically ≤ 0.01s
-            if metadata.exposure_time <= self.BIAS_MAX_EXPOSURE:
-                metadata.classified_type = ImageType.BIAS
+            # BIAS: Short exposure with high ISO but no object (typical bias)
+            # Also check for dark frames with same exposure as lights
+            # 
+            # FLAT: Medium exposure with filter present
+            # SeeStar and similar have filter info
+            if metadata.filter_name and exposure < 30:
+                metadata.classified_type = ImageType.FLAT
                 metadata.confidence = 0.85
                 return
             
-            # FLAT: Short exposure, often with filter
-            elif metadata.exposure_time <= self.FLAT_MAX_EXPOSURE:
-                # Flats typically have filter information
-                if metadata.filter_name or (metadata.exposure_time >= self.FLAT_MIN_EXPOSURE):
+            # DARK: Long exposure with no object (lens cap on)
+            # BUT: SeeStar/S50 Lights are also 10-15s - need to distinguish
+            if not metadata.object_name or not metadata.object_name.strip():
+                # No object name - could be dark or flat
+                if metadata.filter_name:
+                    # Has filter = likely flat
                     metadata.classified_type = ImageType.FLAT
-                    metadata.confidence = 0.8
-                    return
-                # Could also be bias at higher exposures
-                elif metadata.exposure_time <= 1.0:
-                    metadata.classified_type = ImageType.BIAS
                     metadata.confidence = 0.7
-                    return
-            
-            # LIGHT or DARK: Long exposure (> 10s)
-            elif metadata.exposure_time >= self.LIGHT_MIN_EXPOSURE:
-                # No object name suggests dark frame
-                if not metadata.object_name or not metadata.object_name.strip():
-                    metadata.classified_type = ImageType.DARK
-                    metadata.confidence = 0.75
-                    return
                 else:
-                    metadata.classified_type = ImageType.LIGHT
-                    metadata.confidence = 0.8
-                    return
+                    # No filter, medium exposure = likely dark
+                    metadata.classified_type = ImageType.DARK
+                    metadata.confidence = 0.6
+                return
+            
+            # LIGHT: Has object name (the target being photographed)
+            # OR: Medium-long exposure without explicit dark/flat markers
+            if metadata.object_name and metadata.object_name.strip():
+                # Has object name = Light frame
+                metadata.classified_type = ImageType.LIGHT
+                metadata.confidence = 0.85
+                return
         
-        # Priority 4: Filename pattern analysis
+        # Priority 3: Filename pattern analysis (as fallback, not primary)
         classified_from_filename = self._classify_from_filename(metadata)
-        if classified_from_filename:
+        if classified_from_filename and metadata.confidence >= 0.7:
             return
         
         # Cannot determine from metadata
