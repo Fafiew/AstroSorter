@@ -20,6 +20,10 @@ from AstroSorter.classifier import (
 from AstroSorter.ui_components import Theme
 
 
+# App version
+VERSION = "1.0.1"
+
+
 class AstroSorterApp(ctk.CTk):
     """Main application window"""
     
@@ -27,9 +31,9 @@ class AstroSorterApp(ctk.CTk):
         super().__init__()
         
         # Window configuration
-        self.title("AstroSorter - Astrophotography Image Classifier")
-        self.geometry("1400x850")
-        self.minsize(1200, 700)
+        self.title(f"AstroSorter v{VERSION} - Astrophotography Image Classifier")
+        self.geometry("1500x900")
+        self.minsize(1300, 750)
         
         # Configure grid
         self.grid_columnconfigure(1, weight=1)
@@ -56,6 +60,9 @@ class AstroSorterApp(ctk.CTk):
             'create_subfolders': True,
             'export_json_report': True
         }
+        
+        # Preview image
+        self.current_preview_file: Optional[str] = None
         
         # Setup UI
         self._setup_ui()
@@ -103,6 +110,10 @@ class AstroSorterApp(ctk.CTk):
         ctk.CTkLabel(logo_frame, text="AstroSorter", font=ctk.CTkFont(size=20, weight="bold"), 
                      text_color=Theme.ACCENT_HIGHLIGHT).pack(side="left", padx=(10, 0))
         
+        # Version
+        ctk.CTkLabel(logo_frame, text=f"v{VERSION}", font=ctk.CTkFont(size=11),
+                     text_color=Theme.TEXT_MUTED).pack(side="right")
+        
         # Navigation
         nav_frame = ctk.CTkFrame(self.sidebar, fg_color="transparent")
         nav_frame.pack(fill="x", padx=10, pady=10)
@@ -122,10 +133,6 @@ class AstroSorterApp(ctk.CTk):
             self.nav_buttons.append(btn)
         
         self.nav_buttons[0].configure(fg_color=Theme.ACCENT_PRIMARY, text_color=Theme.TEXT_PRIMARY)
-        
-        # Version
-        ctk.CTkLabel(self.sidebar, text="v1.0.0", font=ctk.CTkFont(size=11),
-                     text_color=Theme.TEXT_MUTED).pack(side="bottom", pady=15)
     
     def _setup_header(self):
         """Setup header"""
@@ -229,11 +236,6 @@ class AstroSorterApp(ctk.CTk):
         ctk.CTkLabel(drop_card, text="Supports: CR2, NEF, ARW, RAF, DNG, FITS, TIFF, JPG • All major camera brands",
                      font=ctk.CTkFont(size=11), text_color=Theme.TEXT_MUTED
                      ).grid(row=4, column=0, pady=(0, 40))
-        
-        # Results summary (initially hidden)
-        self.summary_frame = ctk.CTkFrame(self.content_container, fg_color="transparent")
-        self.summary_frame.grid(row=1, column=0, sticky="ew", pady=(10, 0))
-        self.summary_frame.grid_forget()
     
     def _show_files_view(self):
         """Show files view with classification results"""
@@ -263,7 +265,7 @@ class AstroSorterApp(ctk.CTk):
         for widget in self.content_container.winfo_children():
             widget.grid_forget()
         
-        # Main container
+        # Main container - split into table and preview
         main_container = ctk.CTkFrame(self.content_container, fg_color="transparent")
         main_container.grid(row=0, column=0, sticky="nsew")
         main_container.grid_rowconfigure(2, weight=1)
@@ -288,13 +290,13 @@ class AstroSorterApp(ctk.CTk):
         
         # Info label
         info_label = ctk.CTkLabel(main_container, 
-            text="💡 Click on a type dropdown in the table below to change it, then click 'Apply & Export' to organize files",
+            text="💡 Click on a type dropdown to change it, click filename to preview, then click 'Apply & Export' to organize files",
             font=ctk.CTkFont(size=12), text_color=Theme.TEXT_SECONDARY)
         info_label.grid(row=1, column=0, sticky="w", pady=(0, 10))
         
-        # Table frame
+        # Split: table (left) and preview (right)
         table_frame = ctk.CTkFrame(main_container, fg_color=Theme.BG_CARD, corner_radius=12)
-        table_frame.grid(row=2, column=0, sticky="nsew")
+        table_frame.grid(row=2, column=0, sticky="nsew", padx=(0, 15))
         table_frame.grid_rowconfigure(1, weight=1)
         table_frame.grid_columnconfigure(0, weight=1)
         
@@ -305,6 +307,23 @@ class AstroSorterApp(ctk.CTk):
         # Scrollable table
         self.table_scroll = ctk.CTkScrollableFrame(table_frame, fg_color="transparent")
         self.table_scroll.grid(row=1, column=0, sticky="nsew", padx=10, pady=(0, 10))
+        
+        # Preview panel (right side)
+        self.preview_frame = ctk.CTkFrame(main_container, fg_color=Theme.BG_CARD, corner_radius=12, width=300)
+        self.preview_frame.grid(row=2, column=1, sticky="nsew", padx=(0, 0))
+        self.preview_frame.grid_rowconfigure(1, weight=1)
+        
+        ctk.CTkLabel(self.preview_frame, text="Image Preview", font=ctk.CTkFont(size=16, weight="bold"),
+                     text_color=Theme.TEXT_PRIMARY).grid(row=0, column=0, padx=15, pady=(15, 10))
+        
+        # Preview image label
+        self.preview_label = ctk.CTkLabel(self.preview_frame, text="Click a file to preview",
+                                           font=ctk.CTkFont(size=13), text_color=Theme.TEXT_MUTED)
+        self.preview_label.grid(row=1, column=0, padx=15, pady=15, sticky="nsew")
+        
+        # Configure grid weights
+        main_container.grid_columnconfigure(0, weight=3)
+        main_container.grid_columnconfigure(1, weight=1)
         
         # Populate table
         self._populate_file_table()
@@ -338,57 +357,94 @@ class AstroSorterApp(ctk.CTk):
         header_frame = ctk.CTkFrame(self.table_scroll, fg_color=Theme.BG_TERTIARY, corner_radius=8)
         header_frame.pack(fill="x", pady=(0, 5))
         
-        headers = [("File", 250), ("Detected Type", 140), ("Exposure", 90), ("ISO", 70), ("Camera", 120)]
+        headers = [("File", 200), ("Type", 130), ("Exposure", 80), ("ISO", 60), ("Camera", 100)]
         for i, (text, width) in enumerate(headers):
             ctk.CTkLabel(header_frame, text=text, font=ctk.CTkFont(size=12, weight="bold"),
-                         text_color=Theme.TEXT_PRIMARY, width=width).pack(side="left", padx=12, pady=10)
+                         text_color=Theme.TEXT_PRIMARY, width=width).pack(side="left", padx=10, pady=10)
         
         # Sort results by type
         sorted_results = sorted(self.results, key=lambda x: x.classified_type.value)
         
         # File rows
         self.file_rows = []
+        
         for idx, metadata in enumerate(sorted_results):
             row_frame = ctk.CTkFrame(self.table_scroll, fg_color=Theme.BG_SECONDARY if idx % 2 == 0 else "transparent", corner_radius=6)
             row_frame.pack(fill="x", pady=2)
             
-            # Filename
-            fname = metadata.filename[:35] + ("..." if len(metadata.filename) > 35 else "")
-            ctk.CTkLabel(row_frame, text=fname,
-                         font=ctk.CTkFont(size=11), text_color=Theme.TEXT_PRIMARY, width=250, anchor="w"
-                         ).pack(side="left", padx=12, pady=8)
+            # Filename (clickable for preview)
+            fname = metadata.filename[:30] + ("..." if len(metadata.filename) > 30 else "")
+            filename_label = ctk.CTkLabel(row_frame, text=fname,
+                         font=ctk.CTkFont(size=11), text_color=Theme.ACCENT_HIGHLIGHT, width=200, anchor="w",
+                         cursor="hand2")
+            filename_label.pack(side="left", padx=10, pady=8)
+            filename_label.bind("<Button-1>", lambda e, m=metadata: self._show_preview(m))
             
-            # Type selector (dropdown)
-            type_var = ctk.StringVar(value=metadata.classified_type.value)
-            type_menu = ctk.CTkOptionMenu(row_frame, values=["Lights", "Darks", "Flats", "Biases", "Flat-Darks", "Unknown"],
+            # Type selector using StringVar stored in results
+            # Use the metadata object itself to store selected type
+            if not hasattr(metadata, 'selected_type'):
+                metadata.selected_type = metadata.classified_type.value
+            
+            type_var = ctk.StringVar(value=metadata.selected_type)
+            
+            # Create dropdown with unique callback
+            type_menu = ctk.CTkOptionMenu(row_frame, 
+                                          values=["Lights", "Darks", "Flats", "Biases", "Flat-Darks", "Unknown"],
                                           variable=type_var, fg_color=Theme.ACCENT_SECONDARY,
                                           button_color=Theme.ACCENT_PRIMARY, button_hover_color="#ff6b8a",
-                                          dropdown_fg_color=Theme.BG_CARD, width=140, height=30,
+                                          dropdown_fg_color=Theme.BG_CARD, width=130, height=30,
                                           font=ctk.CTkFont(size=11))
             type_menu.pack(side="left", padx=5)
-            type_menu.configure(command=lambda m=metadata, v=type_var: self._on_type_change(m, v))
+            
+            # Bind the change handler - using trace to capture the new value
+            type_var.trace_add("write", lambda *args, m=metadata, v=type_var: self._on_type_change(m, v))
             
             # Exposure
             exp_str = f"{metadata.exposure_time:.2f}s" if metadata.exposure_time else "-"
             ctk.CTkLabel(row_frame, text=exp_str, font=ctk.CTkFont(size=11), 
-                         text_color=Theme.TEXT_SECONDARY, width=90).pack(side="left", padx=5)
+                         text_color=Theme.TEXT_SECONDARY, width=80).pack(side="left", padx=5)
             
             # ISO
             ctk.CTkLabel(row_frame, text=str(metadata.iso) if metadata.iso else "-", 
-                         font=ctk.CTkFont(size=11), text_color=Theme.TEXT_SECONDARY, width=70).pack(side="left", padx=5)
+                         font=ctk.CTkFont(size=11), text_color=Theme.TEXT_SECONDARY, width=60).pack(side="left", padx=5)
             
             # Camera
-            cam_str = (metadata.camera[:15] + "..") if metadata.camera and len(metadata.camera) > 17 else (metadata.camera or "-")
+            cam_str = (metadata.camera[:12] + "..") if metadata.camera and len(metadata.camera) > 14 else (metadata.camera or "-")
             ctk.CTkLabel(row_frame, text=cam_str, font=ctk.CTkFont(size=11), 
-                         text_color=Theme.TEXT_SECONDARY, width=120).pack(side="left", padx=5)
+                         text_color=Theme.TEXT_SECONDARY, width=100).pack(side="left", padx=5)
             
-            self.file_rows.append((metadata, type_var, row_frame))
+            self.file_rows.append((metadata, type_var, row_frame, type_menu))
     
-    def _on_type_change(self, metadata: ImageMetadata, type_var: ctk.StringVar):
+    def _show_preview(self, metadata: ImageMetadata):
+        """Show image preview"""
+        try:
+            from PIL import Image, ImageTk
+            import io
+            
+            # Try to load the image
+            img = Image.open(metadata.filepath)
+            
+            # Resize to fit preview area (max 280x280)
+            img.thumbnail((260, 260), Image.Resampling.LANCZOS)
+            
+            # Convert to PhotoImage
+            photo = ImageTk.PhotoImage(img)
+            
+            # Update preview label
+            self.preview_label.configure(image=photo, text="", imageanchor="center")
+            self.preview_label.image = photo  # Keep reference
+            
+        except Exception as e:
+            self.preview_label.configure(text=f"Cannot preview:\n{str(e)[:50]}", image=None)
+    
+    def _on_type_change(self, metadata: ImageMetadata, type_var):
         """Handle type change"""
         new_type = type_var.get()
         
-        # Update metadata
+        # Update stored type
+        metadata.selected_type = new_type
+        
+        # Update actual type
         type_map = {
             "Lights": ImageType.LIGHT, "Darks": ImageType.DARK, 
             "Flats": ImageType.FLAT, "Biases": ImageType.BIAS,
@@ -396,7 +452,7 @@ class AstroSorterApp(ctk.CTk):
         }
         
         metadata.classified_type = type_map.get(new_type, ImageType.UNKNOWN)
-        metadata.confidence = 1.0
+        metadata.confidence = 1.0  # Manual override = 100%
         
         # Refresh the summary
         self._refresh_summary()
@@ -405,7 +461,6 @@ class AstroSorterApp(ctk.CTk):
         """Refresh the type summary counts"""
         for img_type, card in self.type_cards.items():
             count = sum(1 for r in self.results if r.classified_type == img_type)
-            # Update the count label (second child)
             children = card.winfo_children()
             if len(children) > 1:
                 children[1].configure(text=str(count))
@@ -646,7 +701,10 @@ class AstroSorterApp(ctk.CTk):
             pass
         
         # Open destination
-        os.startfile(destination)
+        try:
+            os.startfile(destination)
+        except:
+            pass
         
         messagebox.showinfo("Export Complete", f"Files exported to:\n{destination}")
     
@@ -655,20 +713,28 @@ class AstroSorterApp(ctk.CTk):
         metadata_list = []
         
         for metadata in self.results:
+            # Use selected type if available (handles manual overrides)
+            final_type = getattr(metadata, 'selected_type', metadata.classified_type.value)
+            
             metadata_list.append({
                 'filename': metadata.filename,
                 'original_path': metadata.filepath,
-                'classified_type': metadata.classified_type.value,
+                'classified_type': final_type,
                 'confidence': metadata.confidence,
                 'exposure_time': metadata.exposure_time,
                 'iso': metadata.iso,
                 'filter': metadata.filter_name,
                 'camera': metadata.camera,
-                'object_name': metadata.object_name
+                'object_name': metadata.object_name,
+                'mean': metadata.mean,
+                'std': metadata.std,
+                'ccd_temp': metadata.ccd_temp,
+                'date_obs': metadata.date_obs
             })
         
         output_data = {
             'generated': datetime.now().isoformat(),
+            'version': VERSION,
             'source_directory': self.current_directory,
             'total_files': len(self.results),
             'summary': self.batch_classifier.get_summary(),

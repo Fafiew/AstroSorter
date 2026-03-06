@@ -240,27 +240,37 @@ class AstroClassifier:
     def _read_raw_metadata(self, metadata: ImageMetadata, compute_stats: bool = True):
         """Read metadata from RAW files (Canon, Nikon, Sony, etc.)"""
         
-        # First try EXIF extraction
+        # First try EXIF extraction (works for many RAW files too)
         self._read_exif_metadata(metadata)
         
-        # If rawpy is available and we need stats, use it
-        if compute_stats and self._rawpy:
+        # Try to get more info from RAW file directly
+        if self._rawpy:
             try:
                 with self._rawpy.imread(metadata.filepath) as raw:
                     # Get basic info
                     if metadata.iso is None:
                         metadata.iso = raw.iso
                     
+                    # Try to get other metadata
+                    try:
+                        metadata.camera = raw.camera_model.decode() if hasattr(raw, 'camera_model') else None
+                    except:
+                        pass
+                    
                     # Compute statistics from RAW data
-                    raw_data = raw.raw_image_visible.astype(np.float32)
-                    metadata.mean = float(np.mean(raw_data))
-                    metadata.std = float(np.std(raw_data))
-                    metadata.min_val = float(np.min(raw_data))
-                    metadata.max_val = float(np.max(raw_data))
-            except Exception:
+                    if compute_stats:
+                        try:
+                            raw_data = raw.raw_image_visible.astype(np.float32)
+                            metadata.mean = float(np.mean(raw_data))
+                            metadata.std = float(np.std(raw_data))
+                            metadata.min_val = float(np.min(raw_data))
+                            metadata.max_val = float(np.max(raw_data))
+                        except:
+                            pass
+            except:
                 pass
         
-        # Try reading embedded thumbnail for basic stats
+        # Fallback: try reading embedded thumbnail for basic stats
         if metadata.mean is None:
             try:
                 with Image.open(metadata.filepath) as img:
@@ -271,8 +281,18 @@ class AstroClassifier:
                     metadata.std = float(np.std(arr))
                     metadata.min_val = float(np.min(arr))
                     metadata.max_val = float(np.max(arr))
-            except Exception:
+            except:
                 pass
+        
+        # If still no ISO, try to extract from filename patterns
+        if metadata.iso is None:
+            filename = metadata.filename.upper()
+            # Common ISO patterns in filenames
+            iso_patterns = ['ISO100', 'ISO200', 'ISO400', 'ISO800', 'ISO1600', 'ISO3200', 'ISO6400']
+            for pattern in iso_patterns:
+                if pattern in filename:
+                    metadata.iso = int(pattern.replace('ISO', ''))
+                    break
     
     def _read_standard_metadata(self, metadata: ImageMetadata, compute_stats: bool = True):
         """Read metadata from standard image formats (TIFF, JPEG, PNG)"""
