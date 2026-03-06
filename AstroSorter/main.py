@@ -565,10 +565,27 @@ class AstroSorterApp(ctk.CTk):
         messagebox.showinfo("Settings", "Saved!")
     
     def _center_window(self):
+        # Update idle tasks to get correct window size
         self.update_idletasks()
-        x = (self.winfo_screenwidth() - self.winfo_width()) // 2
-        y = (self.winfo_screenheight() - self.winfo_height()) // 2
-        self.geometry(f"{self.winfo_width()}x{self.winfo_height()}+{x}+{y}")
+        
+        # Get screen dimensions
+        screen_width = self.winfo_screenwidth()
+        screen_height = self.winfo_screenheight()
+        
+        # Get window dimensions
+        win_width = self.winfo_width()
+        win_height = self.winfo_height()
+        
+        # If window dimensions are still 0, use default size
+        if win_width == 0 or win_height == 0:
+            win_width = 1600
+            win_height = 900
+        
+        # Calculate center position
+        x = (screen_width - win_width) // 2
+        y = (screen_height - win_height) // 2
+        
+        self.geometry(f"{win_width}x{win_height}+{x}+{y}")
     
     def browse_folder(self):
         folder = filedialog.askdirectory(title="Select folder with images")
