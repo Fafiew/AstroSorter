@@ -7,7 +7,8 @@ import shutil
 import threading
 import json
 from pathlib import Path
-from tkinter import filedialog, messagebox
+import tkinter as tk
+from tkinter import ttk, filedialog, messagebox
 from datetime import datetime
 from typing import Optional, List
 from functools import partial
@@ -42,7 +43,7 @@ class AstroSorterApp(ctk.CTk):
         
         # UI references
         self.header_buttons = {}
-        self.file_scroll = None
+        self.file_tree = None
         self.type_cards = {}
         
         self.settings = {'recursive': True, 'export_method': 'copy', 'export_json': True,
@@ -253,30 +254,47 @@ class AstroSorterApp(ctk.CTk):
             self.type_cards[t] = card
             cards.grid_columnconfigure(i, weight=1)
         
-        # Table with headers
+        # Table with ttk.Treeview (resizable columns)
         table = ctk.CTkFrame(main, fg_color="#1f1f3d", corner_radius=12)
         table.grid(row=1, column=0, sticky="nsew", padx=(0, 10))
         
-        # Headers frame - stored for updates
-        self.headers_frame = ctk.CTkFrame(table, fg_color="#16213e", corner_radius=8)
-        self.headers_frame.pack(fill="x", padx=10, pady=10)
+        # Style for treeview
+        style = ttk.Style()
+        style.theme_use("default")
+        style.configure("Treeview", background="#1f1f3d", foreground="white", fieldbackground="#1f1f3d",
+                       rowheight=28, font=("Segoe UI", 10))
+        style.configure("Treeview.Heading", background="#16213e", foreground="white",
+                       font=("Segoe UI", 10, "bold"))
+        style.map("Treeview", background=[("selected", "#e94560")])
         
-        # Create header buttons
-        self.header_buttons = {}
-        cols = [("filename", "File", 180), ("type", "Type", 110), ("exposure", "Exp", 70), 
-                ("iso", "ISO", 50), ("camera", "Camera", 100), ("mean", "Mean", 70)]
+        # Treeview columns
+        cols = ("filename", "type", "exposure", "iso", "camera", "mean")
+        self.file_tree = ttk.Treeview(table, columns=cols, show="headings", style="Treeview")
         
-        for col_id, col_name, width in cols:
-            btn = ctk.CTkButton(self.headers_frame, text=col_name, fg_color="transparent", hover_color="#1f1f3d",
-                         text_color="white", width=width, height=30, corner_radius=5, border_width=0,
-                         font=("Segoe UI", 11, "bold"),
-                         command=partial(self.sort_files, col_id))
-            btn.pack(side="left", padx=3)
-            self.header_buttons[col_id] = btn
+        # Configure columns with resizable headers
+        col_configs = [("filename", "File", 180), ("type", "Type", 100), ("exposure", "Exp", 70),
+                       ("iso", "ISO", 60), ("camera", "Camera", 100), ("mean", "Mean", 70)]
+        for col_id, col_name, width in col_configs:
+            self.file_tree.heading(col_id, text=col_name, command=partial(self.sort_files, col_id))
+            self.file_tree.column(col_id, width=width, minwidth=40, anchor="w")
         
-        # Scrollable frame for file list
-        self.file_scroll = ctk.CTkScrollableFrame(table, fg_color="transparent")
-        self.file_scroll.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+        # Scrollbars
+        vsb = ttk.Scrollbar(table, orient="vertical", command=self.file_tree.yview)
+        hsb = ttk.Scrollbar(table, orient="horizontal", command=self.file_tree.xview)
+        self.file_tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+        
+        self.file_tree.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
+        vsb.grid(row=0, column=1, sticky="ns", pady=10)
+        hsb.grid(row=1, column=0, sticky="ew", padx=10)
+        
+        table.grid_rowconfigure(0, weight=1)
+        table.grid_columnconfigure(0, weight=1)
+        
+        # Bind click event
+        self.file_tree.bind("<ButtonRelease-1>", self._on_file_select)
+        
+        # Store column widths for sorting updates
+        self._col_widths = {col: w for col, _, w in col_configs}
         
         # Preview panel
         preview = ctk.CTkFrame(main, fg_color="#1f1f3d", corner_radius=12)
@@ -295,25 +313,31 @@ class AstroSorterApp(ctk.CTk):
         self._populate_file_list()
     
     def _update_headers(self):
-        """Update header button colors and arrows"""
+        """Update header colors and arrows for Treeview"""
         cols = [("filename", "File"), ("type", "Type"), ("exposure", "Exp"), 
                 ("iso", "ISO"), ("camera", "Camera"), ("mean", "Mean")]
         
         for col_id, col_name in cols:
-            if col_id in self.header_buttons:
-                if col_id == self.sort_col:
-                    arrow = " ▲" if self.sort_asc else " ▼"
-                else:
-                    arrow = ""
-                color = "#00d9ff" if self.sort_col == col_id else "white"
-                self.header_buttons[col_id].configure(text=col_name + arrow, text_color=color)
+            arrow = " ▲" if self.sort_asc else " ▼" if self.sort_col == col_id else ""
+            new_text = col_name + arrow
+            
+            # Update heading with arrow
+            if self.sort_col == col_id:
+                font = ("Segoe UI", 10, "bold")
+                foreground = "#00d9ff"
+            else:
+                font = ("Segoe UI", 10, "bold")
+                foreground = "white"
+            
+            self.file_tree.heading(col_id, text=new_text, command=partial(self.sort_files, col_id))
     
     def _populate_file_list(self):
-        if not self.file_scroll:
+        if not self.file_tree:
             return
-            
-        for w in self.file_scroll.winfo_children():
-            w.destroy()
+        
+        # Clear existing items
+        for item in self.file_tree.get_children():
+            self.file_tree.delete(item)
         
         # Sort
         reverse = not self.sort_asc
@@ -333,39 +357,34 @@ class AstroSorterApp(ctk.CTk):
         else:
             sorted_results = list(self.results)
         
-        type_values = ["Lights", "Darks", "Flats", "Biases", "Unknown"]
-        
         for idx, m in enumerate(sorted_results):
-            row = ctk.CTkFrame(self.file_scroll, fg_color="#1a1a2e" if idx % 2 == 0 else "#1f1f3d", corner_radius=6)
-            row.pack(fill="x", pady=2)
-            
-            thumb = ctk.CTkLabel(row, text="🖼", font=("Segoe UI", 14), cursor="hand2", text_color="#00d9ff")
-            thumb.pack(side="left", padx=(8, 0))
-            thumb.bind("<Button-1>", lambda e, mm=m: self._show_preview(mm))
-            
-            fname = m.filename[:25] + ("..." if len(m.filename) > 25 else "")
-            ctk.CTkLabel(row, text=fname, text_color="white", width=150, anchor="w", 
-                        font=("Segoe UI", 10)).pack(side="left", padx=5)
-            
-            current_type = m.classified_type.value if m.classified_type else "Unknown"
-            var = ctk.StringVar(value=current_type)
-            
-            dropdown = ctk.CTkOptionMenu(row, values=type_values, variable=var,
-                            fg_color="#0f3460", button_color="#e94560",
-                            dropdown_fg_color="#1f1f3d", width=110, height=28, font=("Segoe UI", 9),
-                            command=lambda v, mm=m: self.change_type(mm, v))
-            dropdown.pack(side="left", padx=3)
-            
             exp_text = f"{m.exposure_time:.1f}s" if m.exposure_time else "-"
-            ctk.CTkLabel(row, text=exp_text, text_color="#a0a0a0", width=70).pack(side="left")
-            ctk.CTkLabel(row, text=str(m.iso) if m.iso else "-", text_color="#a0a0a0", width=50).pack(side="left")
-            cam = (m.camera_model[:12] + "..") if m.camera_model and len(m.camera_model) > 12 else (m.camera_model or "-")
-            ctk.CTkLabel(row, text=cam, text_color="#a0a0a0", width=100).pack(side="left")
+            iso_text = str(m.iso) if m.iso else "-"
+            cam_text = m.camera_model[:20] if m.camera_model else "-"
             mean_text = f"{m.mean:.1f}" if m.mean else "-"
-            ctk.CTkLabel(row, text=mean_text, text_color="#a0a0a0", width=70).pack(side="left")
+            
+            self.file_tree.insert("", "end", iid=idx, values=(
+                m.filename,
+                m.classified_type.value if m.classified_type else "Unknown",
+                exp_text,
+                iso_text,
+                cam_text,
+                mean_text
+            ), tags=("clickable",))
+        
+        # Update header arrows
+        self._update_headers()
         
         # Update counts
         self._refresh_counts()
+    
+    def _on_file_select(self, event):
+        """Handle file selection in treeview"""
+        selection = self.file_tree.selection()
+        if selection:
+            idx = int(selection[0])
+            if idx < len(self.results):
+                self._show_preview(self.results[idx])
     
     def _show_preview(self, metadata: ImageMetadata):
         self.selected_image = metadata
