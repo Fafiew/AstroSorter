@@ -434,15 +434,18 @@ class AstroSorterApp(ctk.CTk):
         self._refresh_counts()
     
     def _check_for_updates(self):
-        """Check for latest version from GitHub"""
+        """Check for latest version from GitHub version.py"""
         try:
-            # Fetch the latest version from GitHub tags
-            url = "https://api.github.com/repos/Fafiew/AstroSorter/tags"
-            req = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json"})
+            # Fetch the version.py file from GitHub
+            url = "https://raw.githubusercontent.com/Fafiew/AstroSorter/main/AstroSorter/version.py"
+            req = urllib.request.Request(url, headers={"Accept": "text/plain"})
             with urllib.request.urlopen(req, timeout=10) as response:
-                data = json.loads(response.read().decode())
-                if data:
-                    latest = data[0]["name"].lstrip("v")
+                content = response.read().decode()
+                # Extract VERSION = "x.x.x"
+                import re
+                match = re.search(r'VERSION\s*=\s*["\']([^"\']+)["\']', content)
+                if match:
+                    latest = match.group(1)
                     
                     # Update label in main thread
                     def update_label():
