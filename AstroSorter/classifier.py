@@ -22,7 +22,7 @@ class ImageType(Enum):
 
 
 RAW_EXTENSIONS = {'.cr2', '.cr3', '.crw', '.nef', '.nrw', '.arw', '.sr2', '.srf',
-    '.raf', '.dng', '.orf', '.rw2', '.pef', '.raw'}
+    '.raf', '.dng', '.orf', '.rw2', '.pef', '.raw', '.dng'}
 FITS_EXTENSIONS = {'.fit', '.fits', '.fts'}
 IMAGE_EXTENSIONS = RAW_EXTENSIONS | FITS_EXTENSIONS | {'.tif', '.tiff', '.jpg', '.jpeg', '.png'}
 

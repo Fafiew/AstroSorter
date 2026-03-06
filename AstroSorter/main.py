@@ -1,5 +1,5 @@
 """
-AstroSorter - Main Application v1.0.3
+AstroSorter - Main Application v1.0.4
 """
 
 import os
@@ -13,12 +13,11 @@ from typing import Optional, List
 from functools import partial
 
 import customtkinter as ctk
-from customtkinter import CTkImage
 
 from AstroSorter.classifier import ImageMetadata, ImageType, classify_directory, get_summary
 
 
-VERSION = "1.0.3"
+VERSION = "1.0.4"
 
 
 class AstroSorterApp(ctk.CTk):
@@ -30,24 +29,19 @@ class AstroSorterApp(ctk.CTk):
         self.geometry("1400x800")
         self.minsize(1000, 600)
         
-        # Configure
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("dark-blue")
-        
         self.configure(fg_color="#0d0d1a")
         
-        # State
         self.results: List[ImageMetadata] = []
         self.current_view = "home"
         self.sort_col = "filename"
         self.sort_asc = True
         
-        # Setup
         self._setup_ui()
         self._center_window()
     
     def _setup_ui(self):
-        # Main grid
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
         
@@ -55,15 +49,13 @@ class AstroSorterApp(ctk.CTk):
         self.sidebar = ctk.CTkFrame(self, fg_color="#1a1a2e", width=200, corner_radius=0)
         self.sidebar.grid(row=0, column=0, sticky="nsew")
         
-        # Logo
         ctk.CTkLabel(self.sidebar, text="🔭 AstroSorter", font=("Segoe UI", 20, "bold"),
                      text_color="#00d9ff").pack(pady=20, padx=20)
         ctk.CTkLabel(self.sidebar, text=f"v{VERSION}", font=("Segoe UI", 10),
                      text_color="#606080").pack(pady=(0, 20))
         
-        # Nav buttons
         self.nav_btns = {}
-        for i, (name, icon) in enumerate([("home", "🏠 Home"), ("files", "📁 Files"), ("settings", "⚙️ Settings")]):
+        for name, icon in [("home", "🏠 Home"), ("files", "📁 Files"), ("settings", "⚙️ Settings")]:
             btn = ctk.CTkButton(self.sidebar, text=icon, fg_color="transparent", hover_color="#16213e",
                                text_color="#a0a0a0", height=40, corner_radius=8, anchor="w",
                                command=partial(self.show_view, name))
@@ -72,18 +64,16 @@ class AstroSorterApp(ctk.CTk):
         
         self.nav_btns["home"].configure(fg_color="#e94560", text_color="white")
         
-        # Main content area
+        # Main content
         self.content = ctk.CTkFrame(self, fg_color="#0d0d1a", corner_radius=0)
         self.content.grid(row=0, column=1, sticky="nsew", padx=20, pady=20)
         
-        # Header
         header = ctk.CTkFrame(self.content, fg_color="transparent")
         header.pack(fill="x", pady=(0, 15))
         
         self.title_label = ctk.CTkLabel(header, text="Welcome", font=("Segoe UI", 24, "bold"), text_color="white")
         self.title_label.pack(side="left")
         
-        # Buttons
         btn_frame = ctk.CTkFrame(header, fg_color="transparent")
         btn_frame.pack(side="right")
         
@@ -95,34 +85,26 @@ class AstroSorterApp(ctk.CTk):
                                        command=self.export_results, state="disabled")
         self.export_btn.pack(side="left")
         
-        # Content container
         self.view_container = ctk.CTkFrame(self.content, fg_color="transparent")
         self.view_container.pack(fill="both", expand=True)
         
-        # Status bar
         self.status = ctk.CTkFrame(self, fg_color="#1a1a2e", height=30, corner_radius=0)
         self.status.grid(row=1, column=0, columnspan=2, sticky="ew")
         self.status_label = ctk.CTkLabel(self.status, text="Ready", text_color="#a0a0a0", font=("Segoe UI", 11))
         self.status_label.pack(side="left", padx=20)
         
-        # Show home
         self.show_view("home")
     
     def show_view(self, name: str):
         self.current_view = name
         
-        # Update nav
         for n, btn in self.nav_btns.items():
-            if n == name:
-                btn.configure(fg_color="#e94560", text_color="white")
-            else:
-                btn.configure(fg_color="transparent", text_color="#a0a0a0")
+            btn.configure(fg_color="#e94560" if n == name else "transparent",
+                         text_color="white" if n == name else "#a0a0a0")
         
-        # Update title
         titles = {"home": "Welcome to AstroSorter", "files": "Source Files", "settings": "Settings"}
         self.title_label.configure(text=titles[name])
         
-        # Clear container
         for w in self.view_container.winfo_children():
             w.destroy()
         
@@ -143,7 +125,7 @@ class AstroSorterApp(ctk.CTk):
                     text_color="#a0a0a0").pack(pady=10)
         ctk.CTkButton(card, text="Browse Folder", fg_color="#e94560", hover_color="#ff6b8a",
                      height=45, font=("Segoe UI", 14, "bold"), command=self.browse_folder).pack(pady=30)
-        ctk.CTkLabel(card, text="Supports: CR2, NEF, ARW, DNG, FITS, TIFF, JPG",
+        ctk.CTkLabel(card, text="Supports: CR2, CR3, NEF, ARW, RAF, DNG, FITS, TIFF, JPG",
                     text_color="#606080", font=("Segoe UI", 10)).pack(pady=(0, 40))
     
     def _show_files(self):
@@ -160,8 +142,11 @@ class AstroSorterApp(ctk.CTk):
         cards.pack(fill="x", pady=(0, 15))
         
         self.type_cards = {}
-        for i, (t, icon, label) in enumerate([(ImageType.LIGHT, "🌟", "Lights"), (ImageType.DARK, "🌙", "Darks"),
-                   (ImageType.FLAT, "☀️", "Flats"), (ImageType.BIAS, "📊", "Biases"), (ImageType.UNKNOWN, "❓", "Unknown")]):
+        types_list = [(ImageType.LIGHT, "🌟", "Lights"), (ImageType.DARK, "🌙", "Darks"),
+                     (ImageType.FLAT, "☀️", "Flats"), (ImageType.BIAS, "📊", "Biases"),
+                     (ImageType.UNKNOWN, "❓", "Unknown")]
+        
+        for i, (t, icon, label) in enumerate(types_list):
             card = ctk.CTkFrame(cards, fg_color="#1f1f3d", corner_radius=12)
             card.pack(side="left", expand=True, padx=5, fill="both")
             ctk.CTkLabel(card, text=icon, font=("Segoe UI", 24)).pack(pady=(15, 5))
@@ -175,7 +160,6 @@ class AstroSorterApp(ctk.CTk):
         table = ctk.CTkFrame(self.view_container, fg_color="#1f1f3d", corner_radius=12)
         table.pack(fill="both", expand=True)
         
-        # Headers
         headers = ctk.CTkFrame(table, fg_color="#16213e", corner_radius=8)
         headers.pack(fill="x", padx=10, pady=10)
         
@@ -188,15 +172,17 @@ class AstroSorterApp(ctk.CTk):
                          font=("Segoe UI", 11, "bold"),
                          command=partial(self.sort_files, col_id)).pack(side="left", padx=5)
         
-        # Scrollable list
         scroll = ctk.CTkScrollableFrame(table, fg_color="transparent")
         scroll.pack(fill="both", expand=True, padx=10, pady=(0, 10))
         
         self._populate_file_list(scroll)
     
     def _populate_file_list(self, parent):
-        # Sort
+        for w in parent.winfo_children():
+            w.destroy()
+        
         reverse = not self.sort_asc
+        
         if self.sort_col == "filename":
             sorted_results = sorted(self.results, key=lambda r: r.filename.lower(), reverse=reverse)
         elif self.sort_col == "type":
@@ -212,33 +198,40 @@ class AstroSorterApp(ctk.CTk):
         else:
             sorted_results = self.results
         
+        # Type values for dropdown
+        type_values = ["Lights", "Darks", "Flats", "Biases", "Unknown"]
+        
         for idx, m in enumerate(sorted_results):
             row = ctk.CTkFrame(parent, fg_color="#1a1a2e" if idx % 2 == 0 else "#1f1f3d", corner_radius=6)
             row.pack(fill="x", pady=2)
             
             # Filename
-            ctk.CTkLabel(row, text=m.filename[:35] + ("..." if len(m.filename) > 35 else ""),
-                        text_color="white", width=200, anchor="w", font=("Segoe UI", 10)).pack(side="left", padx=10, pady=8)
+            fname = m.filename[:35] + ("..." if len(m.filename) > 35 else "")
+            ctk.CTkLabel(row, text=fname, text_color="white", width=200, anchor="w", 
+                        font=("Segoe UI", 10)).pack(side="left", padx=10, pady=8)
             
-            # Type dropdown
-            if not hasattr(m, 'selected_type'):
-                m.selected_type = m.classified_type.value
+            # Type dropdown - show current value immediately
+            current_type = m.classified_type.value if m.classified_type else "Unknown"
             
-            var = ctk.StringVar(value=m.selected_type)
-            ctk.CTkOptionMenu(row, values=["Lights", "Darks", "Flats", "Biases", "Unknown"],
-                            variable=var, fg_color="#0f3460", button_color="#e94560",
+            var = ctk.StringVar(value=current_type)
+            dropdown = ctk.CTkOptionMenu(row, values=type_values, variable=var,
+                            fg_color="#0f3460", button_color="#e94560",
                             dropdown_fg_color="#1f1f3d", width=120, height=28, font=("Segoe UI", 10),
-                            command=lambda v, mm=m: self.change_type(mm, v)).pack(side="left", padx=5)
+                            command=lambda v, mm=m: self.change_type(mm, v))
+            dropdown.pack(side="left", padx=5)
             
             # Other columns
-            ctk.CTkLabel(row, text=f"{m.exposure_time:.3f}s" if m.exposure_time else "-",
-                        text_color="#a0a0a0", width=80).pack(side="left")
+            exp_text = f"{m.exposure_time:.3f}s" if m.exposure_time else "-"
+            ctk.CTkLabel(row, text=exp_text, text_color="#a0a0a0", width=80).pack(side="left")
+            
             ctk.CTkLabel(row, text=str(m.iso) if m.iso else "-",
                         text_color="#a0a0a0", width=60).pack(side="left")
-            ctk.CTkLabel(row, text=(m.camera_model[:15] or "-") + (".." if m.camera_model and len(m.camera_model) > 15 else ""),
-                        text_color="#a0a0a0", width=120).pack(side="left")
-            ctk.CTkLabel(row, text=f"{m.mean:.0f}" if m.mean else "-",
-                        text_color="#a0a0a0", width=80).pack(side="left")
+            
+            cam_text = (m.camera_model[:15] + "..") if m.camera_model and len(m.camera_model) > 15 else (m.camera_model or "-")
+            ctk.CTkLabel(row, text=cam_text, text_color="#a0a0a0", width=120).pack(side="left")
+            
+            mean_text = f"{m.mean:.0f}" if m.mean else "-"
+            ctk.CTkLabel(row, text=mean_text, text_color="#a0a0a0", width=80).pack(side="left")
         
         # Update counts
         for t, card in self.type_cards.items():
@@ -264,11 +257,11 @@ class AstroSorterApp(ctk.CTk):
             self.sort_col = col
             self.sort_asc = True
         
-        # Rebuild list
+        # Find scrollable frame and repopulate
         for w in self.view_container.winfo_children():
             if hasattr(w, 'winfo_children'):
                 for c in w.winfo_children():
-                    if hasattr(c, 'winfo_children'):
+                    if isinstance(c, ctk.CTkFrame):
                         for sc in c.winfo_children():
                             if isinstance(sc, ctk.CTkScrollableFrame):
                                 self._populate_file_list(sc)
@@ -362,22 +355,17 @@ class AstroSorterApp(ctk.CTk):
         
         self.status_label.configure(text="Exporting...")
         
-        # Create folders
+        # Create folders - include Unknown
         folders = {}
         for t in ImageType:
-            if t != ImageType.UNKNOWN:
-                folders[t] = os.path.join(dest, t.value)
-                os.makedirs(folders[t], exist_ok=True)
+            folders[t] = os.path.join(dest, t.value)
+            os.makedirs(folders[t], exist_ok=True)
         
         # Export
         for m in self.results:
-            if m.classified_type == ImageType.UNKNOWN:
-                continue
-            
             dst = folders[m.classified_type]
             dst_path = os.path.join(dst, m.filename)
             
-            # Handle duplicates
             counter = 1
             while os.path.exists(dst_path):
                 dst_path = os.path.join(dst, f"{Path(m.filename).stem}_{counter}{Path(m.filename).suffix}")
@@ -399,7 +387,7 @@ class AstroSorterApp(ctk.CTk):
                 'total': len(self.results),
                 'files': [{
                     'filename': m.filename,
-                    'type': getattr(m, 'selected_type', m.classified_type.value),
+                    'type': m.classified_type.value,
                     'exposure': m.exposure_time,
                     'iso': m.iso,
                     'camera': m.camera_model,
