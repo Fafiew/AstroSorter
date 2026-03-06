@@ -247,13 +247,18 @@ class AstroSorterApp(ctk.CTk):
         
         self.type_cards = {}
         types_list = [(ImageType.LIGHT, "🌟", "Lights"), (ImageType.DARK, "🌙", "Darks"),
-                     (ImageType.FLAT, "☀️", "Flats"), (ImageType.BIAS, "📊", "Biases"),
+                     (ImageType.FLAT, "🔆", "Flats"), (ImageType.BIAS, "📊", "Biases"),
                      (ImageType.UNKNOWN, "❓", "Unknown")]
         
         for i, (t, icon, label) in enumerate(types_list):
             card = ctk.CTkFrame(cards, fg_color="#1f1f3d", corner_radius=12)
             card.pack(side="left", expand=True, padx=5, fill="both")
-            ctk.CTkLabel(card, text=icon, font=("Segoe UI", 24), anchor="center").pack(pady=(15, 5), fill="x")
+            
+            # Center the icon using anchor in a fixed-width container
+            icon_container = ctk.CTkFrame(card, fg_color="transparent")
+            icon_container.pack(fill="x", pady=(15, 5))
+            ctk.CTkLabel(icon_container, text=icon, font=("Segoe UI", 24)).pack(anchor="center")
+            
             count = sum(1 for r in self.results if r.classified_type == t)
             ctk.CTkLabel(card, text=str(count), font=("Segoe UI", 20, "bold"), text_color="white").pack()
             ctk.CTkLabel(card, text=label, text_color="#a0a0a0", font=("Segoe UI", 10)).pack(pady=(0, 15))
