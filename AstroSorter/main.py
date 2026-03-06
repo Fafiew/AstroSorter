@@ -581,29 +581,24 @@ class AstroSorterApp(ctk.CTk):
     def _set_icon(self):
         """Set the application icon"""
         import sys
+        import os
         
         # Determine base path depending on frozen state
         if getattr(sys, 'frozen', False):
             base_path = sys._MEIPASS
         else:
-            base_path = Path(__file__).parent.parent
+            base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         
         # Try different icon files
         icon_files = ['256.ico', '256.png', 'fullres.ico', 'fullres.png']
         
         for icon_file in icon_files:
-            icon_path = base_path / 'assets' / icon_file
-            if icon_path.exists():
+            icon_path = os.path.join(base_path, 'assets', icon_file)
+            if os.path.exists(icon_path):
                 try:
-                    # For .ico files use iconbitmap, for PNG use wm_iconphoto
+                    # For .ico files use iconbitmap
                     if icon_file.endswith('.ico'):
-                        self.iconbitmap(str(icon_path))
-                    else:
-                        # For PNG, convert to PhotoImage and use
-                        from PIL import Image as PILImage
-                        img = PILImage.open(str(icon_path))
-                        img = img.resize((256, 256), PILImage.LANCZOS)
-                        self.iconphoto(True, ctk.CTkImage(img, size=(256, 256)))
+                        self.iconbitmap(icon_path)
                     break
                 except Exception as e:
                     print(f"Failed to set icon {icon_file}: {e}")
