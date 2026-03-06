@@ -1,5 +1,5 @@
 """
-AstroSorter - Main Application v1.1.2
+AstroSorter - Main Application
 """
 
 import os
@@ -17,9 +17,7 @@ from customtkinter import CTkImage
 from PIL import Image as PILImage
 
 from AstroSorter.classifier import ImageMetadata, ImageType, classify_directory, get_summary
-
-
-VERSION = "1.1.2"
+from AstroSorter.version import VERSION
 
 
 class AstroSorterApp(ctk.CTk):
@@ -145,10 +143,10 @@ class AstroSorterApp(ctk.CTk):
         version_frame = ctk.CTkFrame(card, fg_color="#16213e", corner_radius=10)
         version_frame.pack(pady=20)
         
-        ctk.CTkLabel(version_frame, text=f"Current Version: {VERSION}", 
+        ctk.CTkLabel(version_frame, text=f"Current Version: {VERSION}",
                     text_color="white", font=("Segoe UI", 14)).pack(pady=15, padx=30)
         
-        ctk.CTkLabel(version_frame, text="Latest: 1.1.4", 
+        ctk.CTkLabel(version_frame, text=f"Latest: {VERSION}", 
                     text_color="#00ff88", font=("Segoe UI", 12)).pack(pady=(0, 15), padx=30)
         
         # Current folder
