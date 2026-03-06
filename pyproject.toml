@@ -1,0 +1,57 @@
+[project]
+name = "astro-sorter"
+version = "1.0.0"
+description = "Automatic Astrophotography Image Sorter - Classify and sort images into Lights, Darks, Flats, Biases"
+authors = [{name = "AstroSorter Team", email = "hello@astrosorter.app"}]
+license = {text = "MIT"}
+readme = "README.md"
+requires-python = ">=3.10"
+keywords = ["astrophotography", "image-processing", "calibration-frames", " astrophotography"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Astronomy",
+]
+
+dependencies = [
+    "customtkinter>=5.2.0",
+    "Pillow>=10.0.0",
+    "numpy>=1.24.0",
+    "rawpy>=0.18.0",
+    "scikit-image>=0.21.0",
+    "tqdm>=4.65.0",
+    "darkdetect>=0.8.0",
+    "psutil>=5.9.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-cov>=4.1.0",
+    "black>=23.7.0",
+    "mypy>=1.5.0",
+]
+
+[project.scripts]
+astro-sorter = "astro_sorter.main:main"
+
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["astro_sorter"]
+
+[tool.black]
+line-length = 100
+target-version = ['py310']
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
