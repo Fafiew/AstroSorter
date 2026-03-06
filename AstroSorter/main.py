@@ -130,103 +130,52 @@ class AstroSorterApp(ctk.CTk):
         main = ctk.CTkFrame(self.view_container, fg_color="transparent")
         main.pack(fill="both", expand=True)
         
-        top = ctk.CTkFrame(main, fg_color="#1f1f3d", corner_radius=10)
-        top.pack(fill="x", pady=(0, 10))
+        # Welcome card
+        card = ctk.CTkFrame(main, fg_color="#1f1f3d", corner_radius=20)
+        card.pack(fill="both", expand=True, padx=50, pady=30)
         
-        ctk.CTkButton(top, text="⬆️ Up", fg_color="transparent", hover_color="#16213e",
-                      width=50, command=self.go_up).pack(side="left", padx=10, pady=10)
+        # Welcome message
+        ctk.CTkLabel(card, text="🔭 Welcome to AstroSorter", font=("Segoe UI", 28, "bold"),
+                    text_color="#00d9ff").pack(pady=(40, 10))
         
-        path = self.current_directory if self.current_directory else "Select a folder"
-        ctk.CTkLabel(top, text=path[:70] + "..." if len(path) > 70 else path,
-                    text_color="#00d9ff", font=("Segoe UI", 12)).pack(side="left", pady=10)
+        ctk.CTkLabel(card, text="Automatically sort your astrophotography images", 
+                    text_color="#a0a0a0", font=("Segoe UI", 14)).pack(pady=(0, 30))
         
-        ctk.CTkButton(top, text="📂 Browse", fg_color="#e94560", hover_color="#ff6b8a",
-                      command=self.browse_folder).pack(side="right", padx=10, pady=10)
+        # Version info
+        version_frame = ctk.CTkFrame(card, fg_color="#16213e", corner_radius=10)
+        version_frame.pack(pady=20)
         
-        list_frame = ctk.CTkFrame(main, fg_color="#1f1f3d", corner_radius=10)
-        list_frame.pack(fill="both", expand=True)
+        ctk.CTkLabel(version_frame, text=f"Current Version: {VERSION}", 
+                    text_color="white", font=("Segoe UI", 14)).pack(pady=15, padx=30)
         
-        scroll = ctk.CTkScrollableFrame(list_frame, fg_color="transparent")
-        scroll.pack(fill="both", expand=True, padx=5, pady=5)
+        ctk.CTkLabel(version_frame, text="Latest: 1.1.3", 
+                    text_color="#00ff88", font=("Segoe UI", 12)).pack(pady=(0, 15), padx=30)
         
-        self._populate_file_explorer(scroll)
-    
-    def _populate_file_explorer(self, parent):
-        for w in parent.winfo_children():
-            w.destroy()
+        # Current folder
+        folder_frame = ctk.CTkFrame(card, fg_color="transparent")
+        folder_frame.pack(pady=20)
         
-        base_path = self.current_directory if self.current_directory else os.getcwd()
+        ctk.CTkLabel(folder_frame, text="📁 Selected Folder:", 
+                    text_color="#a0a0a0", font=("Segoe UI", 12)).pack()
         
-        if not os.path.exists(base_path):
-            ctk.CTkLabel(parent, text="Folder not found", text_color="#ff6666").pack()
-            return
+        folder_path = self.current_directory if self.current_directory else "No folder selected"
+        ctk.CTkLabel(folder_frame, text=folder_path, text_color="#00d9ff", 
+                    font=("Segoe UI", 11), wraplength=400).pack(pady=5)
         
-        items = []
-        try:
-            for item in os.listdir(base_path):
-                full_path = os.path.join(base_path, item)
-                is_dir = os.path.isdir(full_path)
-                items.append((item, is_dir, full_path))
-        except:
-            pass
+        # Buttons
+        btn_frame = ctk.CTkFrame(card, fg_color="transparent")
+        btn_frame.pack(pady=30)
         
-        items.sort(key=lambda x: (not x[1], x[0].lower()))
+        ctk.CTkButton(btn_frame, text="📂 Select Folder", fg_color="#e94560", hover_color="#ff6b8a",
+                     height=45, font=("Segoe UI", 14, "bold"), command=self.browse_folder).pack(side="left", padx=10)
         
-        if not items:
-            ctk.CTkLabel(parent, text="Empty folder", text_color="#606080").pack(pady=20)
-            return
+        ctk.CTkButton(btn_frame, text="🐙 GitHub", fg_color="#16213e", hover_color="#0f3460",
+                     height=45, font=("Segoe UI", 14), 
+                     command=lambda: os.system("start https://github.com/Fafiew/AstroSorter")).pack(side="left", padx=10)
         
-        for name, is_dir, full_path in items:
-            row = ctk.CTkFrame(parent, fg_color="#1a1a2e", corner_radius=6)
-            row.pack(fill="x", pady=2)
-            
-            icon = "📁" if is_dir else "📄"
-            color = "#00d9ff" if is_dir else "#a0a0a0"
-            
-            label = ctk.CTkLabel(row, text=f"  {icon} {name}", text_color=color, 
-                                font=("Segoe UI", 11), anchor="w", cursor="hand2")
-            label.pack(side="left", fill="x", expand=True, padx=10, pady=8)
-            
-            if is_dir:
-                label.bind("<Button-1>", lambda e, p=full_path: self.open_folder(p))
-            else:
-                ext = Path(name).suffix.lower()
-                if ext in {'.cr2', '.cr3', '.nef', '.arw', '.raf', '.dng', '.tif', '.tiff', '.jpg', '.jpeg', '.png', '.fits', '.fit', '.fts'}:
-                    label.bind("<Button-1>", lambda e, p=full_path: self._preview_image(p))
-    
-    def go_up(self):
-        if self.current_directory:
-            parent = os.path.dirname(self.current_directory)
-            if parent and parent != self.current_directory:
-                self.current_directory = parent
-                self._show_home()
-    
-    def open_folder(self, path: str):
-        self.current_directory = path
-        self._show_home()
-    
-    def _preview_image(self, filepath: str):
-        img = None
-        ext = Path(filepath).suffix.lower()
-        
-        try:
-            if ext in {'.cr2', '.cr3', '.nef', '.arw', '.raf', '.dng', '.orf', '.rw2', '.pef'}:
-                try:
-                    import rawpy
-                    with rawpy.imread(filepath) as raw:
-                        rgb = raw.postprocess(use_camera_wb=True, no_auto_bright=True)
-                        img = PILImage.fromarray(rgb)
-                except:
-                    pass
-            
-            if img is None:
-                img = PILImage.open(filepath)
-                
-        except Exception as e:
-            messagebox.showerror("Error", f"Cannot load image: {str(e)}")
-            return None
-        
-        return img
+        # Supported formats
+        ctk.CTkLabel(card, text="Supports: CR2, CR3, NEF, ARW, RAF, DNG, FITS, TIFF, JPG, PNG",
+                    text_color="#606080", font=("Segoe UI", 10)).pack(pady=(20, 40))
     
     def _show_files(self):
         if not self.results:
