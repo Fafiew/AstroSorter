@@ -1,5 +1,5 @@
 """
-AstroSorter - Classifier based on correct astrophotography logic
+AstroSorter - Classifier using mean brightness for light/dark
 """
 
 import os
@@ -188,58 +188,41 @@ def classify_directory(directory: str, recursive: bool = True, progress_callback
                 m.classified_type = ImageType.UNKNOWN
             continue
         
-        # Group by exposure time (rounded to 1 decimal)
-        exp_groups: Dict[float, List[ImageMetadata]] = {}
-        for m in images:
-            if m.exposure_time:
-                exp = round(m.exposure_time, 1)
-                if exp not in exp_groups:
-                    exp_groups[exp] = []
-                exp_groups[exp].append(m)
+        # Get all means
+        means = [m.mean for m in images if m.mean is not None]
         
-        if not exp_groups:
+        if not means:
+            # No mean data - use exposure only
             for m in images:
-                m.classified_type = ImageType.UNKNOWN
+                if m.exposure_time and m.exposure_time < 0.1:
+                    m.classified_type = ImageType.BIAS
+                else:
+                    m.classified_type = ImageType.UNKNOWN
             continue
         
-        # Separate by exposure time
-        # BIAS: shortest exposure (< 0.1s)
-        bias_exps = [e for e in exp_groups.keys() if e < 0.1]
+        avg_mean = sum(means) / len(means)
         
-        # LONG exposures (>= 1s)
-        long_exps = [e for e in exp_groups.keys() if e >= 1]
+        # Use MEAN to classify:
+        # - Higher mean (>10) = Lights
+        # - Very low mean (<=10) = Darks
+        # - Shortest exposure (<0.1s) = Bias
         
-        # Find the LESS common long exposure = LIGHTS
-        # The one with FEWER images = Lights (user corrected data)
-        light_exp = None
-        min_count = float('inf')
-        
-        for exp in long_exps:
-            count = len(exp_groups[exp])
-            if count < min_count:
-                min_count = count
-                light_exp = exp
-        
-        # Classify each exposure group
-        for exp, group in exp_groups.items():
-            if exp < 0.1:
-                # BIAS: shortest exposure
-                for m in group:
-                    m.classified_type = ImageType.BIAS
-                    m.confidence = 0.95
-            elif exp == light_exp:
-                # LIGHTS: LESS common long exposure
-                for m in group:
+        for m in images:
+            if m.exposure_time and m.exposure_time < 0.1:
+                # Shortest exposure = Bias
+                m.classified_type = ImageType.BIAS
+                m.confidence = 0.95
+            elif m.mean is not None:
+                if m.mean > 10:
+                    # Higher mean = Lights
                     m.classified_type = ImageType.LIGHT
                     m.confidence = 0.95
-            elif exp > 0.1:
-                # DARKS: other long exposures (more common = darks)
-                for m in group:
+                else:
+                    # Low mean = Darks
                     m.classified_type = ImageType.DARK
-                    m.confidence = 0.90
+                    m.confidence = 0.95
             else:
-                for m in group:
-                    m.classified_type = ImageType.UNKNOWN
+                m.classified_type = ImageType.UNKNOWN
     
     return results
 
