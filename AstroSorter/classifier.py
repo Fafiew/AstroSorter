@@ -1,13 +1,10 @@
 """
-AstroSorter - Complete Classifier Rewrite
-Better metadata extraction and classification
+AstroSorter - Classifier with proper astrophotography logic
 """
 
 import os
-import struct
-import json
 from pathlib import Path
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from typing import Optional, List
 import exifread
@@ -17,7 +14,6 @@ from tqdm import tqdm
 
 
 class ImageType(Enum):
-    """Astrophotography image types"""
     LIGHT = "Lights"
     DARK = "Darks"
     FLAT = "Flats"
@@ -26,521 +22,301 @@ class ImageType(Enum):
     UNKNOWN = "Unknown"
 
 
-# RAW extensions
-RAW_EXTENSIONS = {
-    '.cr2', '.cr3', '.crw', '.nef', '.nrw', '.arw', '.sr2', '.srf',
-    '.raf', '.dng', '.orf', '.rw2', '.pef', '.srw', '.3fr', '.iiq',
-    '.rwl', '.x3f', '.kdc', '.dcr', '.erf', '.mef', '.mdc', '.mos', '.raw'
-}
-
+RAW_EXTENSIONS = {'.cr2', '.cr3', '.crw', '.nef', '.nrw', '.arw', '.sr2', '.srf',
+    '.raf', '.dng', '.orf', '.rw2', '.pef', '.raw'}
 FITS_EXTENSIONS = {'.fit', '.fits', '.fts'}
 IMAGE_EXTENSIONS = RAW_EXTENSIONS | FITS_EXTENSIONS | {'.tif', '.tiff', '.jpg', '.jpeg', '.png'}
 
 
 @dataclass
 class ImageMetadata:
-    """Complete metadata for an image"""
     filename: str
     filepath: str
     file_ext: str
     
-    # File info
-    file_size: int = 0
-    
-    # EXIF/FITS data
+    # EXIF data
     exposure_time: Optional[float] = None
     iso: Optional[int] = None
-    f_number: Optional[float] = None
-    focal_length: Optional[float] = None
-    lens_model: Optional[str] = None
-    camera_make: Optional[str] = None
     camera_model: Optional[str] = None
     date_time: Optional[str] = None
     
-    # Astro-specific
-    object_name: Optional[str] = None
-    filter_name: Optional[str] = None
-    ccd_temp: Optional[float] = None
-    imagetyp: Optional[str] = None
-    
-    # Computed statistics
+    # Statistics
     mean: Optional[float] = None
     std: Optional[float] = None
-    min_val: Optional[float] = None
     max_val: Optional[float] = None
     
     # Classification
     classified_type: ImageType = ImageType.UNKNOWN
     confidence: float = 0.0
-    
-    # For sorting
     selected_type: Optional[str] = None
-    
-    error: Optional[str] = None
 
 
-def get_file_size(filepath: str) -> int:
-    """Get file size in bytes"""
-    try:
-        return os.path.getsize(filepath)
-    except:
-        return 0
-
-
-def read_raw_exif(filepath: str) -> dict:
-    """Read EXIF data from any file using multiple methods"""
+def read_exif(filepath: str) -> dict:
+    """Read EXIF from file"""
     result = {}
-    
-    # Method 1: exifread (works for JPEG, TIFF, some RAW)
     try:
         with open(filepath, 'rb') as f:
-            tags = exifread.process_file(f, details=False)
-            for tag, value in tags.items():
+            for tag, value in exifread.process_file(f, details=False).items():
                 result[tag] = str(value)
     except:
         pass
-    
     return result
 
 
-def parse_exposure_time(value: str) -> Optional[float]:
-    """Parse exposure time from EXIF value"""
-    if not value:
-        return None
+def get_stats(filepath: str, ext: str) -> dict:
+    """Get image statistics"""
+    result = {'mean': None, 'std': None, 'max': None}
     try:
-        if '/' in value:
-            parts = value.split('/')
-            return float(parts[0]) / float(parts[1])
-        return float(value)
-    except:
-        return None
-
-
-def parse_iso(value: str) -> Optional[int]:
-    """Parse ISO from EXIF value"""
-    if not value:
-        return None
-    try:
-        if '/' in value:
-            parts = value.split('/')
-            return int(float(parts[0]) / float(parts[1]))
-        return int(value)
-    except:
-        return None
-
-
-def read_canon_exif(filepath: str) -> dict:
-    """Read Canon-specific EXIF data"""
-    result = {}
-    try:
-        with open(filepath, 'rb') as f:
-            # Skip to end of JPEG/RAW header to find Canon Maker Note
-            # This is a simplified version - full implementation would parse Canon format
-            pass
-    except:
-        pass
-    return result
-
-
-def read_fits_metadata(filepath: str) -> dict:
-    """Read FITS header metadata"""
-    result = {}
-    try:
-        with open(filepath, 'rb') as f:
-            # Read primary header (typically 2880 bytes)
-            header_data = f.read(2880)
-            
-            if not header_data.startswith(b'SIMPLE'):
-                return result
-            
-            # Parse header keywords
-            lines = header_data.decode('ascii', errors='ignore').split('\n')
-            for line in lines:
-                if '=' in line and '/' in line:
-                    key = line.split('=')[0].strip()
-                    value = line.split('=')[1].split('/')[0].strip().strip("'")
-                    
-                    if key in ['EXPTIME', 'EXPOSURE', 'TELAPSE']:
-                        try:
-                            result['EXPOSURE'] = float(value)
-                        except:
-                            pass
-                    elif key == 'IMAGETYP':
-                        result['IMAGETYP'] = value.upper()
-                    elif key == 'OBJECT':
-                        result['OBJECT'] = value
-                    elif key == 'FILTER':
-                        result['FILTER'] = value
-                    elif key == 'ISO' or key == 'GAIN':
-                        try:
-                            result['ISO'] = int(value)
-                        except:
-                            pass
-                    elif key == 'CCD-TEMP' or key == 'DET-TEMP':
-                        try:
-                            result['CCD-TEMP'] = float(value)
-                        except:
-                            pass
-                    elif key == 'INSTRUME':
-                        result['INSTRUMENT'] = value
-                    elif key == 'DATE-OBS':
-                        result['DATE-OBS'] = value
-                        
-    except:
-        pass
-    
-    return result
-
-
-def extract_filename_info(filename: str) -> dict:
-    """Extract info from filename patterns"""
-    result = {}
-    fn = filename.upper()
-    
-    # ISO patterns
-    iso_patterns = ['ISO100', 'ISO200', 'ISO400', 'ISO800', 'ISO1600', 'ISO3200', 'ISO6400', 'ISO12800', 'ISO25600']
-    for pattern in iso_patterns:
-        if pattern in fn:
-            result['ISO'] = int(pattern.replace('ISO', ''))
-            break
-    
-    # Type patterns
-    type_patterns = {
-        'LIGHT': ['LIGHT_', '_LIGHT', 'LIGHT', 'OBJ_', 'TARGET_'],
-        'DARK': ['DARK_', '_DARK', 'DARK', 'DARKS'],
-        'FLAT': ['FLAT_', '_FLAT', 'FLAT', 'FLATS'],
-        'BIAS': ['BIAS_', '_BIAS', 'BIAS', 'OFFSET_', '_OFFSET'],
-        'FLAT-DARK': ['FLAT_DARK', 'DARK_FLAT', 'FLATDARK']
-    }
-    
-    for img_type, patterns in type_patterns.items():
-        for pattern in patterns:
-            if pattern in fn:
-                result['IMAGETYP'] = img_type
-                break
-    
-    # Object name (common targets)
-    targets = ['M31', 'M42', 'M13', 'M45', 'M51', 'M57', 'M27', 'M8', 'M20', 'NGC', 'IC_', 'MESSIER']
-    for target in targets:
-        if target in fn:
-            result['OBJECT'] = target
-            break
-    
-    return result
-
-
-def compute_image_stats(filepath: str, file_ext: str) -> dict:
-    """Compute image statistics"""
-    result = {'mean': None, 'std': None, 'min': None, 'max': None}
-    
-    try:
-        if file_ext in RAW_EXTENSIONS:
-            # Try with rawpy first
+        if ext in RAW_EXTENSIONS:
             try:
                 import rawpy
                 with rawpy.imread(filepath) as raw:
-                    # Get visible raw data
                     data = raw.raw_image_visible.astype(np.float32)
                     result['mean'] = float(np.mean(data))
                     result['std'] = float(np.std(data))
-                    result['min'] = float(np.min(data))
                     result['max'] = float(np.max(data))
                     return result
             except:
                 pass
         
-        # Fallback to PIL (uses embedded thumbnail/preview)
         with Image.open(filepath) as img:
-            # Try to get best quality
-            if hasattr(img, '_getexif'):
-                # Try 16-bit if available
-                pass
-            
-            # Convert to grayscale
             gray = img.convert('L')
             arr = np.array(gray, dtype=np.float32)
-            
             result['mean'] = float(np.mean(arr))
             result['std'] = float(np.std(arr))
-            result['min'] = float(np.min(arr))
             result['max'] = float(np.max(arr))
-            
-    except Exception as e:
-        result['error'] = str(e)
-    
+    except:
+        pass
     return result
 
 
-def classify_image(metadata: ImageMetadata) -> ImageType:
-    """Classify image based on metadata"""
+def extract_filename_info(filename: str) -> dict:
+    """Extract info from filename"""
+    fn = filename.upper()
+    info = {}
     
-    # 1. Explicit IMAGETYP (FITS files)
-    if metadata.imagetyp:
-        typ = metadata.imagetyp.upper()
-        if typ in ['LIGHT', 'OBJECT', 'SCIENCE', 'TARGET']:
-            return ImageType.LIGHT
-        elif typ in ['DARK', 'DARK FRAME']:
-            return ImageType.DARK
-        elif typ in ['FLAT', 'FLAT FIELD', 'FLATFIELD']:
-            return ImageType.FLAT
-        elif typ in ['BIAS', 'BIAS FRAME', 'OFFSET']:
-            return ImageType.BIAS
-        elif typ in ['DARKFLAT', 'FLAT DARK', 'DARK FLAT']:
-            return ImageType.FLAT_DARK
+    # ISO
+    for iso in [100, 200, 400, 800, 1600, 3200, 6400, 12800, 25600]:
+        if f'ISO{iso}' in fn:
+            info['iso'] = iso
+            break
     
-    # 2. Object name present = Light
-    if metadata.object_name and len(metadata.object_name.strip()) > 0:
-        return ImageType.LIGHT
+    # Type patterns
+    for pattern, itype in [('LIGHT', 'LIGHT'), ('DARK', 'DARK'), ('FLAT', 'FLAT'), 
+                           ('BIAS', 'BIAS'), ('OFFSET', 'BIAS')]:
+        if pattern in fn:
+            info['type'] = itype
+            break
     
-    # 3. Exposure time based classification
-    exp = metadata.exposure_time
-    
-    if exp is not None:
-        # Very short = Bias
-        if exp <= 0.001:
-            return ImageType.BIAS
-        
-        # Short with filter = Flat
-        if metadata.filter_name and exp < 60:
-            return ImageType.FLAT
-        
-        # Medium exposure no filter = could be dark
-        if exp >= 1 and not metadata.filter_name:
-            # Check statistics
-            if metadata.mean is not None:
-                # Dark frames have higher mean than bias but not as high as lights
-                if metadata.mean < 3000:
-                    return ImageType.BIAS
-                elif metadata.mean < 10000:
-                    return ImageType.DARK
-                else:
-                    return ImageType.LIGHT
-            return ImageType.DARK
-        
-        # Long exposure = Light or Dark
-        if exp >= 10:
-            return ImageType.LIGHT
-    
-    # 4. Statistics-based classification
-    if metadata.mean is not None:
-        mean = metadata.mean
-        
-        # Very low mean = Bias
-        if mean < 100:
-            return ImageType.BIAS
-        
-        # Low-medium mean with no object = likely Dark
-        if mean < 5000:
-            return ImageType.DARK
-        
-        # Medium-high mean = could be Flat or Light
-        if mean < 30000:
-            if metadata.filter_name:
-                return ImageType.FLAT
-            return ImageType.LIGHT
-        
-        # Very high mean = Light
-        return ImageType.LIGHT
-    
-    # 5. Fallback: can't determine
-    return ImageType.UNKNOWN
-
-
-def calculate_confidence(metadata: ImageMetadata) -> float:
-    """Calculate classification confidence"""
-    confidence = 0.0
-    
-    # Has explicit IMAGETYP = 100%
-    if metadata.imagetyp:
-        return 1.0
-    
-    # Has object name = high confidence
-    if metadata.object_name:
-        confidence = 0.9
-    
-    # Has filter = good indicator for flats
-    elif metadata.filter_name:
-        confidence = 0.85
-    
-    # Has exposure time
-    if metadata.exposure_time is not None:
-        if metadata.exposure_time <= 0.001:
-            confidence = max(confidence, 0.9)  # Bias
-        elif metadata.exposure_time >= 10:
-            confidence = max(confidence, 0.8)  # Light/Dark
-    
-    # Has statistics
-    if metadata.mean is not None:
-        if metadata.mean < 100:
-            confidence = max(confidence, 0.7)
-        elif metadata.mean > 10000:
-            confidence = max(confidence, 0.6)
-    
-    return confidence
+    return info
 
 
 def process_image(filepath: str) -> ImageMetadata:
-    """Process a single image and return metadata"""
+    """Process single image"""
     path = Path(filepath)
     ext = path.suffix.lower()
     
-    metadata = ImageMetadata(
-        filename=path.name,
-        filepath=str(path.absolute()),
-        file_ext=ext,
-        file_size=get_file_size(filepath)
-    )
+    m = ImageMetadata(filename=path.name, filepath=str(path.absolute()), file_ext=ext)
     
     try:
-        # 1. Read EXIF/FITS data
-        if ext in FITS_EXTENSIONS:
-            fits_data = read_fits_metadata(filepath)
-            metadata.exposure_time = fits_data.get('EXPOSURE')
-            metadata.imagetyp = fits_data.get('IMAGETYP')
-            metadata.object_name = fits_data.get('OBJECT')
-            metadata.filter_name = fits_data.get('FILTER')
-            metadata.ccd_temp = fits_data.get('CCD-TEMP')
-            metadata.camera_model = fits_data.get('INSTRUMENT')
-            metadata.date_time = fits_data.get('DATE-OBS')
-            if 'ISO' in fits_data:
-                metadata.iso = fits_data['ISO']
+        # Read EXIF
+        exif = read_exif(filepath)
         
-        # 2. Read standard EXIF (works for JPEG, TIFF, and embedded in some RAW)
-        exif_data = read_raw_exif(filepath)
+        # Parse exposure
+        for tag in ['EXIF ExposureTime', 'Image ExposureTime']:
+            if tag in exif:
+                try:
+                    val = exif[tag]
+                    if '/' in val:
+                        parts = val.split('/')
+                        m.exposure_time = float(parts[0]) / float(parts[1])
+                    else:
+                        m.exposure_time = float(val)
+                    break
+                except:
+                    pass
         
-        if not metadata.exposure_time:
-            if 'EXIF ExposureTime' in exif_data:
-                metadata.exposure_time = parse_exposure_time(exif_data['EXIF ExposureTime'])
-            elif 'Image ExposureTime' in exif_data:
-                metadata.exposure_time = parse_exposure_time(exif_data['Image ExposureTime'])
+        # Parse ISO
+        for tag in ['EXIF ISOSpeedRatings', 'Image ISOSpeedRatings']:
+            if tag in exif:
+                try:
+                    m.iso = int(exif[tag])
+                    break
+                except:
+                    pass
         
-        if not metadata.iso:
-            if 'EXIF ISOSpeedRatings' in exif_data:
-                metadata.iso = parse_iso(exif_data['EXIF ISOSpeedRatings'])
-            elif 'Image ISOSpeedRatings' in exif_data:
-                metadata.iso = parse_iso(exif_data['Image ISOSpeedRatings'])
+        # Camera
+        if 'Image Model' in exif:
+            m.camera_model = exif['Image Model']
         
-        if not metadata.camera_model:
-            if 'Image Model' in exif_data:
-                metadata.camera_model = exif_data['Image Model']
+        # Date
+        if 'EXIF DateTimeOriginal' in exif:
+            m.date_time = exif['EXIF DateTimeOriginal']
         
-        if not metadata.camera_make:
-            if 'Image Make' in exif_data:
-                metadata.camera_make = exif_data['Image Make']
+        # Filename info
+        finfo = extract_filename_info(path.name)
+        if not m.iso and 'iso' in finfo:
+            m.iso = finfo['iso']
         
-        if not metadata.date_time:
-            if 'EXIF DateTimeOriginal' in exif_data:
-                metadata.date_time = exif_data['EXIF DateTimeOriginal']
-            elif 'Image DateTime' in exif_data:
-                metadata.date_time = exif_data['Image DateTime']
+        # Statistics
+        stats = get_stats(filepath, ext)
+        m.mean = stats['mean']
+        m.std = stats['std']
+        m.max_val = stats['max']
         
-        if not metadata.focal_length:
-            if 'EXIF FocalLength' in exif_data:
-                metadata.focal_length = parse_exposure_time(exif_data['EXIF FocalLength'])
-        
-        if not metadata.f_number:
-            if 'EXIF FNumber' in exif_data:
-                metadata.f_number = parse_exposure_time(exif_data['EXIF FNumber'])
-        
-        # 3. Extract from filename
-        filename_info = extract_filename_info(path.name)
-        
-        if not metadata.iso and 'ISO' in filename_info:
-            metadata.iso = filename_info['ISO']
-        
-        if not metadata.imagetyp and 'IMAGETYP' in filename_info:
-            metadata.imagetyp = filename_info['IMAGETYP']
-        
-        if not metadata.object_name and 'OBJECT' in filename_info:
-            metadata.object_name = filename_info['OBJECT']
-        
-        # 4. Compute statistics
-        stats = compute_image_stats(filepath, ext)
-        metadata.mean = stats.get('mean')
-        metadata.std = stats.get('std')
-        metadata.min_val = stats.get('min')
-        metadata.max_val = stats.get('max')
-        
-        # 5. Classify
-        metadata.classified_type = classify_image(metadata)
-        metadata.confidence = calculate_confidence(metadata)
+        # Classification
+        m.classified_type = classify_image(m, finfo)
+        m.confidence = 1.0 if m.classified_type != ImageType.UNKNOWN else 0.0
         
     except Exception as e:
-        metadata.error = str(e)
+        print(f"Error processing {filepath}: {e}")
     
-    return metadata
+    return m
 
 
-def scan_directory(directory: str, recursive: bool = True) -> List[str]:
-    """Scan directory for image files"""
+def classify_image(metadata: ImageMetadata, filename_info: dict) -> ImageType:
+    """Classify based on astrophotography rules"""
+    
+    # 1. Check explicit type from filename or EXIF
+    if 'type' in filename_info:
+        t = filename_info['type'].upper()
+        if t == 'LIGHT': return ImageType.LIGHT
+        if t == 'DARK': return ImageType.DARK
+        if t == 'FLAT': return ImageType.FLAT
+        if t == 'BIAS': return ImageType.BIAS
+    
+    # 2. If no ISO, can't classify properly
+    if metadata.iso is None:
+        return ImageType.UNKNOWN
+    
+    exp = metadata.exposure_time
+    iso = metadata.iso
+    mean = metadata.mean
+    
+    # Get all images to compare (we'll need to group by ISO)
+    # For now, use simple rules based on typical values
+    
+    # BIAS: Very short exposure (typically < 0.01s)
+    if exp is not None and exp < 0.01:
+        return ImageType.BIAS
+    
+    # FLAT: No exposure time info but low mean (typical flat field ~10-20% histogram)
+    if mean is not None and mean < 8000 and exp is not None and exp < 5:
+        return ImageType.FLAT
+    
+    # If we have mean, use that for classification
+    if mean is not None:
+        # Very low mean = Bias
+        if mean < 500:
+            return ImageType.BIAS
+        
+        # Low mean with short exposure = Flat
+        if exp is not None and exp < 10:
+            return ImageType.FLAT
+        
+        # High mean with longer exposure = Light
+        if exp is not None and exp >= 5:
+            return ImageType.LIGHT
+        
+        # Default to Light if we have reasonable mean
+        if mean > 1000:
+            return ImageType.LIGHT
+    
+    return ImageType.UNKNOWN
+
+
+def classify_directory(directory: str, recursive: bool = True, progress_callback=None) -> List[ImageMetadata]:
+    """Classify all images in directory"""
+    
+    # Scan files
     path = Path(directory)
     files = []
-    
-    if recursive:
-        for ext in IMAGE_EXTENSIONS:
+    for ext in IMAGE_EXTENSIONS:
+        if recursive:
             files.extend(path.rglob(f'*{ext}'))
             files.extend(path.rglob(f'*{ext.upper()}'))
-    else:
-        for ext in IMAGE_EXTENSIONS:
+        else:
             files.extend(path.glob(f'*{ext}'))
             files.extend(path.glob(f'*{ext.upper()}'))
     
-    return list(set(str(f) for f in files))
-
-
-def classify_directory(directory: str, recursive: bool = True, 
-                        progress_callback=None) -> List[ImageMetadata]:
-    """Classify all images in a directory"""
+    files = list(set(str(f) for f in files))
     
-    files = scan_directory(directory, recursive)
+    # First pass: get all ISO values
+    iso_groups = {}
     results = []
     
-    for i, filepath in enumerate(files):
-        metadata = process_image(filepath)
-        results.append(metadata)
+    for i, f in enumerate(files):
+        m = process_image(f)
+        results.append(m)
+        
+        if m.iso and m.iso not in iso_groups:
+            iso_groups[m.iso] = []
+        if m.iso:
+            iso_groups[m.iso].append(m)
         
         if progress_callback:
-            progress_callback(i + 1, len(files), filepath)
+            progress_callback(i + 1, len(files), f)
+    
+    # Second pass: re-classify based on ISO groups
+    for iso, images in iso_groups.items():
+        if len(images) < 3:
+            continue
+        
+        # Find the most common exposure time for this ISO
+        exposures = {}
+        for m in images:
+            if m.exposure_time:
+                # Round to nearest second or fraction
+                exp = round(m.exposure_time, 2)
+                exposures[exp] = exposures.get(exp, 0) + 1
+        
+        if not exposures:
+            continue
+        
+        # Most common exposure
+        common_exp = max(exposures.items(), key=lambda x: x[1])[0]
+        
+        # Group by exposure
+        exp_groups = {}
+        for m in images:
+            if m.exposure_time:
+                exp = round(m.exposure_time, 2)
+                if exp not in exp_groups:
+                    exp_groups[exp] = []
+                exp_groups[exp].append(m)
+        
+        # Classify each exposure group
+        for exp, group in exp_groups.items():
+            means = [m.mean for m in group if m.mean is not None]
+            if not means:
+                continue
+            
+            avg_mean = sum(means) / len(means)
+            
+            # Longest exposure = Light
+            if exp >= 10:
+                for m in group:
+                    if m.classified_type == ImageType.UNKNOWN:
+                        m.classified_type = ImageType.LIGHT
+            # Shortest exposure = Bias
+            elif exp < 0.1:
+                for m in group:
+                    if m.classified_type == ImageType.UNKNOWN:
+                        m.classified_type = ImageType.BIAS
+            # Medium = Flat
+            else:
+                for m in group:
+                    if m.classified_type == ImageType.UNKNOWN:
+                        m.classified_type = ImageType.FLAT
     
     return results
 
 
 def get_summary(results: List[ImageMetadata]) -> dict:
     """Get classification summary"""
-    summary = {
-        'total': len(results),
-        'by_type': {},
-        'errors': 0
-    }
-    
-    for img_type in ImageType:
-        count = sum(1 for r in results if r.classified_type == img_type)
-        if count > 0:
-            summary['by_type'][img_type.value] = count
-    
-    summary['errors'] = sum(1 for r in results if r.error)
-    
+    summary = {'total': len(results), 'by_type': {}, 'errors': 0}
+    for t in ImageType:
+        c = sum(1 for r in results if r.classified_type == t)
+        if c > 0:
+            summary['by_type'][t.value] = c
     return summary
-
-
-# Testing
-if __name__ == '__main__':
-    import sys
-    
-    if len(sys.argv) > 1:
-        directory = sys.argv[1]
-        print(f"Processing: {directory}")
-        
-        results = classify_directory(directory)
-        
-        for r in results[:5]:
-            print(f"\n{r.filename}:")
-            print(f"  Type: {r.classified_type.value}")
-            print(f"  Exposure: {r.exposure_time}")
-            print(f"  ISO: {r.iso}")
-            print(f"  Camera: {r.camera_model}")
-            print(f"  Mean: {r.mean}")
-            print(f"  Object: {r.object_name}")
-            print(f"  Filter: {r.filter_name}")
-        
-        print(f"\n{get_summary(results)}")

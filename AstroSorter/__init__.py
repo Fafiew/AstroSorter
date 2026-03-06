@@ -8,15 +8,14 @@ __author__ = "AstroSorter Team"
 __license__ = "MIT"
 
 from .classifier import ImageMetadata, ImageType, classify_directory, get_summary
-from .main import AstroSorterApp, main
+from .main import main
 
-VERSION = "1.0.2"
+VERSION = "1.0.3"
 
 __all__ = [
     "ImageMetadata",
     "ImageType",
     "classify_directory",
     "get_summary",
-    "AstroSorterApp",
     "main"
 ]
