@@ -209,15 +209,15 @@ def classify_directory(directory: str, recursive: bool = True, progress_callback
         # LONG exposures (>= 1s)
         long_exps = [e for e in exp_groups.keys() if e >= 1]
         
-        # Find the most common long exposure = LIGHTS
-        # The one with the most images
+        # Find the LESS common long exposure = LIGHTS
+        # The one with FEWER images = Lights (user corrected data)
         light_exp = None
-        max_count = 0
+        min_count = float('inf')
         
         for exp in long_exps:
             count = len(exp_groups[exp])
-            if count > max_count:
-                max_count = count
+            if count < min_count:
+                min_count = count
                 light_exp = exp
         
         # Classify each exposure group
@@ -228,12 +228,12 @@ def classify_directory(directory: str, recursive: bool = True, progress_callback
                     m.classified_type = ImageType.BIAS
                     m.confidence = 0.95
             elif exp == light_exp:
-                # LIGHTS: most common long exposure
+                # LIGHTS: LESS common long exposure
                 for m in group:
                     m.classified_type = ImageType.LIGHT
                     m.confidence = 0.95
             elif exp > 0.1:
-                # DARKS: other long exposures (same ISO but different target)
+                # DARKS: other long exposures (more common = darks)
                 for m in group:
                     m.classified_type = ImageType.DARK
                     m.confidence = 0.90
