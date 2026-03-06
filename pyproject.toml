@@ -1,6 +1,6 @@
 [project]
 name = "AstroSorter"
-version = "1.0.1"
+version = "1.0.2"
 description = "Automatic Astrophotography Image Sorter - Classify and sort images into Lights, Darks, Flats, Biases"
 authors = [{name = "AstroSorter Team", email = "hello@astrosorter.app"}]
 license = {text = "MIT"}

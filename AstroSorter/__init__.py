@@ -7,16 +7,16 @@ __version__ = "1.0.1"
 __author__ = "AstroSorter Team"
 __license__ = "MIT"
 
-from .classifier import AstroClassifier, BatchClassifier, ImageMetadata, ImageType
+from .classifier import ImageMetadata, ImageType, classify_directory, get_summary
 from .main import AstroSorterApp, main
 
-VERSION = "1.0.1"
+VERSION = "1.0.2"
 
 __all__ = [
-    "AstroClassifier",
-    "BatchClassifier", 
     "ImageMetadata",
     "ImageType",
+    "classify_directory",
+    "get_summary",
     "AstroSorterApp",
     "main"
 ]
