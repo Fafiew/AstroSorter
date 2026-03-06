@@ -221,33 +221,45 @@ def classify_directory(directory: str, recursive: bool = True, progress_callback
         max_mean_exp = max(exp_means.items(), key=lambda x: x[1] or 0)[0]
         max_mean_val = exp_means.get(max_mean_exp, 0)
         
-        # Classify
-        for exp, group in exp_map.items():
-            avg_mean = exp_means.get(exp)
+        # Classify based on mean only - this is the KEY rule
+        # HIGHER mean = LIGHTS, LOWER mean = DARKS
+        sorted_exps = sorted(exp_means.items(), key=lambda x: x[1] or 0, reverse=True)
+        
+        if sorted_exps:
+            # Highest mean = LIGHTS
+            light_exp = sorted_exps[0][0]
+            light_mean = sorted_exps[0][1]
             
-            if exp == max_mean_exp:
-                # Highest mean = LIGHTS
-                for g in group:
-                    g.classified_type = ImageType.LIGHT
-                    g.confidence = 0.9
-            elif exp < 0.01:
-                # Very short = BIAS
-                for g in group:
-                    g.classified_type = ImageType.BIAS
-                    g.confidence = 0.9
-            elif avg_mean and avg_mean < 5000:
-                # Lower mean = DARKS (same exposure as lights)
-                for g in group:
-                    g.classified_type = ImageType.DARK
-                    g.confidence = 0.85
-            elif 0.01 <= exp < 5:
-                # Medium exposure = FLATS
-                for g in group:
-                    g.classified_type = ImageType.FLAT
-                    g.confidence = 0.7
-            else:
-                for g in group:
-                    g.classified_type = ImageType.UNKNOWN
+            # Find minimum mean for darks
+            min_exp = min(exp_means.keys())
+            min_mean = exp_means[min_exp]
+            
+            for exp, group in exp_map.items():
+                avg_mean = exp_means.get(exp)
+                
+                if exp == light_exp or (avg_mean and avg_mean >= 5000):
+                    # Highest mean = LIGHTS
+                    for g in group:
+                        g.classified_type = ImageType.LIGHT
+                        g.confidence = 0.9
+                elif exp < 0.01:
+                    # Very short = BIAS
+                    for g in group:
+                        g.classified_type = ImageType.BIAS
+                        g.confidence = 0.9
+                elif 0.01 <= exp < 5:
+                    # Medium = FLATS
+                    for g in group:
+                        g.classified_type = ImageType.FLAT
+                        g.confidence = 0.7
+                elif avg_mean and avg_mean < 5000:
+                    # Lower mean = DARKS
+                    for g in group:
+                        g.classified_type = ImageType.DARK
+                        g.confidence = 0.85
+                else:
+                    for g in group:
+                        g.classified_type = ImageType.UNKNOWN
     
     return results
 
