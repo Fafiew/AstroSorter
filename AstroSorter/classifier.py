@@ -1,5 +1,5 @@
 """
-AstroSorter - Classifier with correct astrophotography logic
+AstroSorter - Classifier with mean-based light/dark detection
 """
 
 import os
@@ -22,7 +22,7 @@ class ImageType(Enum):
 
 
 RAW_EXTENSIONS = {'.cr2', '.cr3', '.crw', '.nef', '.nrw', '.arw', '.sr2', '.srf',
-    '.raf', '.dng', '.orf', '.rw2', '.pef', '.raw', '.dng'}
+    '.raf', '.dng', '.orf', '.rw2', '.pef', '.raw'}
 FITS_EXTENSIONS = {'.fit', '.fits', '.fts'}
 IMAGE_EXTENSIONS = RAW_EXTENSIONS | FITS_EXTENSIONS | {'.tif', '.tiff', '.jpg', '.jpeg', '.png'}
 
@@ -173,10 +173,15 @@ def classify_directory(directory: str, recursive: bool = True, progress_callback
         if progress_callback:
             progress_callback(i + 1, len(files), f)
     
-    # Group by ISO first
+    # Group by ISO
     iso_groups: Dict[int, List[ImageMetadata]] = {}
     for m in results:
         if m.iso:
+            if m.iso not in iso_groups:
+                iso_groups[m.iso] = []
+            iso_groups[m.iso].append(m)
+        else:
+            # Try to group by filename pattern or just process individually
             if m.iso not in iso_groups:
                 iso_groups[m.iso] = []
             iso_groups[m.iso].append(m)
@@ -186,106 +191,144 @@ def classify_directory(directory: str, recursive: bool = True, progress_callback
         if len(images) < 3:
             for m in images:
                 m.classified_type = ImageType.UNKNOWN
-                m.confidence = 0.0
             continue
         
         # Get all exposure times for this ISO
         exp_map: Dict[float, List[ImageMetadata]] = {}
         for m in images:
             if m.exposure_time:
-                # Round to 2 decimal places
                 exp = round(m.exposure_time, 2)
                 if exp not in exp_map:
                     exp_map[exp] = []
                 exp_map[exp].append(m)
         
         if not exp_map:
-            for m in images:
-                m.classified_type = ImageType.UNKNOWN
+            # No exposure data - use mean brightness
+            _classify_by_mean(images)
             continue
         
-        # Sort exposures
         sorted_exps = sorted(exp_map.keys())
         
-        # Find longest (Lights) - typically >= 5s for astrophotography
-        longest_exp = max(sorted_exps)
-        
-        # Find shortest (Bias) - typically < 0.01s
-        shortest_exp = min(sorted_exps)
-        
         # Identify exposure groups
-        lights_exp = None
+        longest_exp = max(sorted_exps) if sorted_exps else None
+        shortest_exp = min(sorted_exps) if sorted_exps else None
+        
+        # Group exposures into categories
+        light_exp = None
         bias_exp = None
         flat_exp = None
         
         for exp in sorted_exps:
-            if exp >= 5:
-                lights_exp = exp
-                break
+            if exp >= 5 and light_exp is None:
+                light_exp = exp
         
         for exp in sorted_exps:
-            if exp < 0.1:
+            if exp < 0.1 and bias_exp is None:
                 bias_exp = exp
         
-        # Medium exposures could be flats
         for exp in sorted_exps:
-            if exp != lights_exp and exp != bias_exp:
-                if exp >= 0.1 and exp < 5:
+            if exp != light_exp and exp != bias_exp:
+                if 0.1 <= exp < 5:
                     flat_exp = exp
                     break
         
+        # Calculate average mean for each exposure group
+        exp_means = {}
+        for exp, group in exp_map.items():
+            means = [g.mean for g in group if g.mean is not None]
+            if means:
+                exp_means[exp] = sum(means) / len(means)
+        
+        # Find which exposure has highest mean (likely lights)
+        # In astrophotography: lights have higher mean than darks
+        max_mean_exp = None
+        max_mean_val = -1
+        for exp, avg_mean in exp_means.items():
+            if avg_mean > max_mean_val:
+                max_mean_val = avg_mean
+                max_mean_exp = exp
+        
+        # If longest exposure has lower mean than other exposures, swap
+        # This handles the case where lights might be misidentified
+        if longest_exp and max_mean_exp and longest_exp != max_mean_exp:
+            # Check if longest exposure has lower mean - this is wrong
+            if longest_exp in exp_means and exp_means[longest_exp] < max_mean_val:
+                # Longest exposure has lower mean - swap light_exp
+                light_exp = max_mean_exp
+        
         # Now classify each exposure group
         for exp, group in exp_map.items():
-            # Check mean brightness to distinguish flats from darks
-            means = [img.mean for img in group if img.mean is not None]
-            if means:
-                avg_mean = sum(means) / len(means)
-            else:
-                avg_mean = None
+            means = [g.mean for g in group if g.mean is not None]
+            avg_mean = sum(means) / len(means) if means else None
             
-            if exp == shortest_exp or exp < 0.01:
-                # BIAS - very short exposure
-                for m in group:
-                    m.classified_type = ImageType.BIAS
-                    m.confidence = 0.9
-            elif exp == longest_exp and exp >= 5:
-                # LIGHTS - longest exposure (with stars)
-                for m in group:
-                    m.classified_type = ImageType.LIGHT
-                    m.confidence = 0.85
-            elif exp == lights_exp:
-                # Same as lights exposure = DARKS
-                for m in group:
-                    m.classified_type = ImageType.DARK
-                    m.confidence = 0.85
-            elif exp == flat_exp or (exp >= 0.1 and exp < 5):
-                # FLATS - medium short exposure with balanced histogram
-                # Check mean - flats should have moderate brightness
-                if avg_mean and 3000 < avg_mean < 25000:
-                    for m in group:
-                        m.classified_type = ImageType.FLAT
-                        m.confidence = 0.8
-                elif avg_mean and avg_mean < 3000:
-                    # Could be dark for flat
-                    for m in group:
-                        m.classified_type = ImageType.FLAT_DARK
-                        m.confidence = 0.7
+            # KEY RULE: Lights have HIGHER mean than darks
+            if exp == light_exp or exp == max_mean_exp:
+                # Highest mean exposure = LIGHTS
+                for g in group:
+                    g.classified_type = ImageType.LIGHT
+                    g.confidence = 0.9
+            elif exp == bias_exp or exp < 0.01:
+                # Shortest exposure = BIAS
+                for g in group:
+                    g.classified_type = ImageType.BIAS
+                    g.confidence = 0.9
+            elif exp == flat_exp:
+                # Medium exposure, check mean
+                if avg_mean and avg_mean > 5000:
+                    # High mean = FLAT
+                    for g in group:
+                        g.classified_type = ImageType.FLAT
+                        g.confidence = 0.8
                 else:
-                    for m in group:
-                        m.classified_type = ImageType.FLAT
-                        m.confidence = 0.7
+                    # Low mean = flat-dark
+                    for g in group:
+                        g.classified_type = ImageType.FLAT_DARK
+                        g.confidence = 0.7
+            elif light_exp and abs(exp - light_exp) < 0.5:
+                # Same exposure as lights = DARKS
+                # But verify: if mean is much lower, it's dark
+                for g in group:
+                    g.classified_type = ImageType.DARK
+                    g.confidence = 0.85
             else:
-                # Check if exposure matches lights but mean is different = Darks
-                if lights_exp and abs(exp - lights_exp) < 0.5:
-                    for m in group:
-                        m.classified_type = ImageType.DARK
-                        m.confidence = 0.8
+                # Other exposures
+                if avg_mean and avg_mean < 5000:
+                    for g in group:
+                        g.classified_type = ImageType.DARK
+                        g.confidence = 0.7
                 else:
-                    for m in group:
-                        m.classified_type = ImageType.UNKNOWN
-                        m.confidence = 0.0
+                    for g in group:
+                        g.classified_type = ImageType.UNKNOWN
     
     return results
+
+
+def _classify_by_mean(images: List[ImageMetadata]):
+    """Classify by mean brightness when no exposure data"""
+    means = [m.mean for m in images if m.mean is not None]
+    if not means:
+        for m in images:
+            m.classified_type = ImageType.UNKNOWN
+        return
+    
+    avg_mean = sum(means) / len(means)
+    
+    # Find outliers - lights have higher mean
+    light_threshold = avg_mean * 1.5
+    dark_threshold = avg_mean * 0.5
+    
+    for m in images:
+        if m.mean:
+            if m.mean > light_threshold:
+                m.classified_type = ImageType.LIGHT
+                m.confidence = 0.6
+            elif m.mean < dark_threshold:
+                m.classified_type = ImageType.DARK
+                m.confidence = 0.6
+            else:
+                m.classified_type = ImageType.UNKNOWN
+        else:
+            m.classified_type = ImageType.UNKNOWN
 
 
 def get_summary(results: List[ImageMetadata]) -> dict:

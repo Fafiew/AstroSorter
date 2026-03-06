@@ -1,5 +1,5 @@
 """
-AstroSorter - Main Application v1.0.4
+AstroSorter - Main Application v1.0.5
 """
 
 import os
@@ -13,11 +13,13 @@ from typing import Optional, List
 from functools import partial
 
 import customtkinter as ctk
+from customtkinter import CTkImage
+from PIL import Image
 
 from AstroSorter.classifier import ImageMetadata, ImageType, classify_directory, get_summary
 
 
-VERSION = "1.0.4"
+VERSION = "1.0.5"
 
 
 class AstroSorterApp(ctk.CTk):
@@ -34,9 +36,17 @@ class AstroSorterApp(ctk.CTk):
         self.configure(fg_color="#0d0d1a")
         
         self.results: List[ImageMetadata] = []
+        self.current_directory: str = ""
         self.current_view = "home"
         self.sort_col = "filename"
         self.sort_asc = True
+        
+        # Settings
+        self.settings = {
+            'recursive': True,
+            'export_method': 'copy',
+            'export_json': True
+        }
         
         self._setup_ui()
         self._center_window()
@@ -102,7 +112,7 @@ class AstroSorterApp(ctk.CTk):
             btn.configure(fg_color="#e94560" if n == name else "transparent",
                          text_color="white" if n == name else "#a0a0a0")
         
-        titles = {"home": "Welcome to AstroSorter", "files": "Source Files", "settings": "Settings"}
+        titles = {"home": "Select Folder", "files": "Source Files", "settings": "Settings"}
         self.title_label.configure(text=titles[name])
         
         for w in self.view_container.winfo_children():
@@ -116,6 +126,7 @@ class AstroSorterApp(ctk.CTk):
             self._show_settings()
     
     def _show_home(self):
+        # Folder browser card
         card = ctk.CTkFrame(self.view_container, fg_color="#1f1f3d", corner_radius=20)
         card.pack(fill="both", expand=True, padx=50, pady=30)
         
@@ -123,10 +134,40 @@ class AstroSorterApp(ctk.CTk):
         ctk.CTkLabel(card, text="Select Image Folder", font=("Segoe UI", 24, "bold"), text_color="white").pack()
         ctk.CTkLabel(card, text="Browse a folder to automatically classify your astrophotography images",
                     text_color="#a0a0a0").pack(pady=10)
-        ctk.CTkButton(card, text="Browse Folder", fg_color="#e94560", hover_color="#ff6b8a",
-                     height=45, font=("Segoe UI", 14, "bold"), command=self.browse_folder).pack(pady=30)
-        ctk.CTkLabel(card, text="Supports: CR2, CR3, NEF, ARW, RAF, DNG, FITS, TIFF, JPG",
-                    text_color="#606080", font=("Segoe UI", 10)).pack(pady=(0, 40))
+        
+        # Browse button
+        ctk.CTkButton(card, text="📂 Browse Folder", fg_color="#e94560", hover_color="#ff6b8a",
+                     height=45, font=("Segoe UI", 14, "bold"), command=self.browse_folder).pack(pady=15)
+        
+        # Current folder path
+        self.folder_label = ctk.CTkLabel(card, text="No folder selected", text_color="#606080", font=("Segoe UI", 12))
+        self.folder_label.pack(pady=10)
+        
+        # Supported formats
+        ctk.CTkLabel(card, text="Supports: CR2, CR3, NEF, ARW, RAF, DNG, FITS, TIFF, JPG, PNG",
+                    text_color="#606080", font=("Segoe UI", 10)).pack(pady=(20, 40))
+        
+        # File list from current directory
+        if self.current_directory and os.path.exists(self.current_directory):
+            self._show_folder_browser(card)
+    
+    def _show_folder_browser(self, parent):
+        """Show folder browser on home screen"""
+        # Current path
+        path_frame = ctk.CTkFrame(parent, fg_color="#16213e", corner_radius=8)
+        path_frame.pack(fill="x", padx=20, pady=10)
+        
+        path_text = self.current_directory[:60] + "..." if len(self.current_directory) > 60 else self.current_directory
+        ctk.CTkLabel(path_frame, text=f"📁 {path_text}", text_color="#00d9ff", font=("Segoe UI", 11)).pack(pady=8, padx=10, anchor="w")
+        
+        # File count
+        if self.results:
+            ctk.CTkLabel(parent, text=f"{len(self.results)} images found", text_color="#a0a0a0", font=("Segoe UI", 11)).pack()
+            
+            # Process button
+            ctk.CTkButton(parent, text="🔄 Classify Images", fg_color="#00ff88", hover_color="#00cc6a",
+                         height=40, font=("Segoe UI", 13, "bold"), 
+                         command=lambda: self.show_view("files")).pack(pady=10)
     
     def _show_files(self):
         if not self.results:
@@ -156,31 +197,37 @@ class AstroSorterApp(ctk.CTk):
             self.type_cards[t] = card
             cards.grid_columnconfigure(i, weight=1)
         
-        # Table
+        # Table with scrollbar
         table = ctk.CTkFrame(self.view_container, fg_color="#1f1f3d", corner_radius=12)
         table.pack(fill="both", expand=True)
         
+        # Headers
         headers = ctk.CTkFrame(table, fg_color="#16213e", corner_radius=8)
         headers.pack(fill="x", padx=10, pady=10)
         
-        cols = [("filename", "File", 200), ("type", "Type", 120), ("exposure", "Exp", 80), 
-                ("iso", "ISO", 60), ("camera", "Camera", 120), ("mean", "Mean", 80)]
+        cols = [("filename", "File", 180), ("type", "Type", 110), ("exposure", "Exp", 70), 
+                ("iso", "ISO", 50), ("camera", "Camera", 100), ("mean", "Mean", 70)]
         
         for col_id, col_name, width in cols:
-            ctk.CTkButton(headers, text=col_name, fg_color="transparent", hover_color="#1f1f3d",
-                         text_color="white", width=width, height=30, corner_radius=5, border_width=0,
+            arrow = " ▼" if self.sort_col == col_id else ""
+            ctk.CTkButton(headers, text=col_name + arrow, fg_color="transparent", hover_color="#1f1f3d",
+                         text_color="#00d9ff" if self.sort_col == col_id else "white", 
+                         width=width, height=30, corner_radius=5, border_width=0,
                          font=("Segoe UI", 11, "bold"),
-                         command=partial(self.sort_files, col_id)).pack(side="left", padx=5)
+                         command=partial(self.sort_files, col_id)).pack(side="left", padx=3)
         
+        # Scrollable frame
         scroll = ctk.CTkScrollableFrame(table, fg_color="transparent")
         scroll.pack(fill="both", expand=True, padx=10, pady=(0, 10))
         
         self._populate_file_list(scroll)
     
     def _populate_file_list(self, parent):
+        # Clear
         for w in parent.winfo_children():
             w.destroy()
         
+        # Sort
         reverse = not self.sort_asc
         
         if self.sort_col == "filename":
@@ -192,60 +239,54 @@ class AstroSorterApp(ctk.CTk):
         elif self.sort_col == "iso":
             sorted_results = sorted(self.results, key=lambda r: r.iso or 0, reverse=reverse)
         elif self.sort_col == "camera":
-            sorted_results = sorted(self.results, key=lambda r: r.camera_model or "", reverse=reverse)
+            sorted_results = sorted(self.results, key=lambda r: (r.camera_model or "").lower(), reverse=reverse)
         elif self.sort_col == "mean":
             sorted_results = sorted(self.results, key=lambda r: r.mean or 0, reverse=reverse)
         else:
-            sorted_results = self.results
+            sorted_results = list(self.results)
         
-        # Type values for dropdown
         type_values = ["Lights", "Darks", "Flats", "Biases", "Unknown"]
         
         for idx, m in enumerate(sorted_results):
             row = ctk.CTkFrame(parent, fg_color="#1a1a2e" if idx % 2 == 0 else "#1f1f3d", corner_radius=6)
             row.pack(fill="x", pady=2)
             
+            # Thumbnail (small)
+            thumb_label = ctk.CTkLabel(row, text="🖼", width=30, font=("Segoe UI", 16))
+            thumb_label.pack(side="left", padx=(5, 0))
+            thumb_label.bind("<Button-1>", lambda e, mm=m: self._show_preview(mm))
+            
             # Filename
-            fname = m.filename[:35] + ("..." if len(m.filename) > 35 else "")
-            ctk.CTkLabel(row, text=fname, text_color="white", width=200, anchor="w", 
-                        font=("Segoe UI", 10)).pack(side="left", padx=10, pady=8)
+            fname = m.filename[:25] + ("..." if len(m.filename) > 25 else "")
+            ctk.CTkLabel(row, text=fname, text_color="white", width=150, anchor="w", 
+                        font=("Segoe UI", 10)).pack(side="left", padx=5)
             
-            # Type dropdown - show current value immediately
+            # Type dropdown - show current value
             current_type = m.classified_type.value if m.classified_type else "Unknown"
-            
             var = ctk.StringVar(value=current_type)
+            
             dropdown = ctk.CTkOptionMenu(row, values=type_values, variable=var,
                             fg_color="#0f3460", button_color="#e94560",
-                            dropdown_fg_color="#1f1f3d", width=120, height=28, font=("Segoe UI", 10),
+                            dropdown_fg_color="#1f1f3d", width=110, height=28, font=("Segoe UI", 9),
                             command=lambda v, mm=m: self.change_type(mm, v))
-            dropdown.pack(side="left", padx=5)
+            dropdown.pack(side="left", padx=3)
             
-            # Other columns
+            # Exposure
             exp_text = f"{m.exposure_time:.3f}s" if m.exposure_time else "-"
-            ctk.CTkLabel(row, text=exp_text, text_color="#a0a0a0", width=80).pack(side="left")
+            ctk.CTkLabel(row, text=exp_text, text_color="#a0a0a0", width=70).pack(side="left")
             
-            ctk.CTkLabel(row, text=str(m.iso) if m.iso else "-",
-                        text_color="#a0a0a0", width=60).pack(side="left")
+            # ISO
+            ctk.CTkLabel(row, text=str(m.iso) if m.iso else "-", text_color="#a0a0a0", width=50).pack(side="left")
             
-            cam_text = (m.camera_model[:15] + "..") if m.camera_model and len(m.camera_model) > 15 else (m.camera_model or "-")
-            ctk.CTkLabel(row, text=cam_text, text_color="#a0a0a0", width=120).pack(side="left")
+            # Camera
+            cam = (m.camera_model[:12] + "..") if m.camera_model and len(m.camera_model) > 12 else (m.camera_model or "-")
+            ctk.CTkLabel(row, text=cam, text_color="#a0a0a0", width=100).pack(side="left")
             
+            # Mean
             mean_text = f"{m.mean:.0f}" if m.mean else "-"
-            ctk.CTkLabel(row, text=mean_text, text_color="#a0a0a0", width=80).pack(side="left")
+            ctk.CTkLabel(row, text=mean_text, text_color="#a0a0a0", width=70).pack(side="left")
         
         # Update counts
-        for t, card in self.type_cards.items():
-            count = sum(1 for r in self.results if r.classified_type == t)
-            card.winfo_children()[1].configure(text=str(count))
-    
-    def change_type(self, metadata: ImageMetadata, new_type: str):
-        metadata.selected_type = new_type
-        type_map = {"Lights": ImageType.LIGHT, "Darks": ImageType.DARK, 
-                   "Flats": ImageType.FLAT, "Biases": ImageType.BIAS, "Unknown": ImageType.UNKNOWN}
-        metadata.classified_type = type_map.get(new_type, ImageType.UNKNOWN)
-        self._refresh_counts()
-    
-    def _refresh_counts(self):
         for t, card in self.type_cards.items():
             count = sum(1 for r in self.results if r.classified_type == t)
             card.winfo_children()[1].configure(text=str(count))
@@ -257,14 +298,54 @@ class AstroSorterApp(ctk.CTk):
             self.sort_col = col
             self.sort_asc = True
         
-        # Find scrollable frame and repopulate
+        # Find scroll frame and refresh
         for w in self.view_container.winfo_children():
-            if hasattr(w, 'winfo_children'):
+            if isinstance(w, ctk.CTkFrame):
                 for c in w.winfo_children():
-                    if isinstance(c, ctk.CTkFrame):
-                        for sc in c.winfo_children():
-                            if isinstance(sc, ctk.CTkScrollableFrame):
-                                self._populate_file_list(sc)
+                    if isinstance(c, ctk.CTkScrollableFrame):
+                        self._populate_file_list(c)
+                        return
+    
+    def _show_preview(self, metadata: ImageMetadata):
+        """Show image preview"""
+        try:
+            from PIL import Image as PILImage
+            
+            img = PILImage.open(metadata.filepath)
+            img.thumbnail((400, 400))
+            
+            ctk_img = CTkImage(img, size=img.size)
+            
+            # Create popup
+            popup = ctk.CTkToplevel(self)
+            popup.title(metadata.filename)
+            popup.geometry("500x500")
+            
+            label = ctk.CTkLabel(popup, image=ctk_img, text="")
+            label.image = ctk_img
+            label.pack(padx=20, pady=20)
+            
+            info = f"Type: {metadata.classified_type.value}\n"
+            info += f"Exposure: {metadata.exposure_time if metadata.exposure_time else '-'}s\n"
+            info += f"ISO: {metadata.iso if metadata.iso else '-'}\n"
+            info += f"Camera: {metadata.camera_model if metadata.camera_model else '-'}\n"
+            info += f"Mean: {metadata.mean if metadata.mean else '-'}"
+            
+            ctk.CTkLabel(popup, text=info, font=("Segoe UI", 12)).pack(pady=10)
+            
+        except Exception as e:
+            messagebox.showerror("Preview Error", f"Cannot preview: {str(e)}")
+    
+    def change_type(self, metadata: ImageMetadata, new_type: str):
+        type_map = {"Lights": ImageType.LIGHT, "Darks": ImageType.DARK, 
+                   "Flats": ImageType.FLAT, "Biases": ImageType.BIAS, "Unknown": ImageType.UNKNOWN}
+        metadata.classified_type = type_map.get(new_type, ImageType.UNKNOWN)
+        self._refresh_counts()
+    
+    def _refresh_counts(self):
+        for t, card in self.type_cards.items():
+            count = sum(1 for r in self.results if r.classified_type == t)
+            card.winfo_children()[1].configure(text=str(count))
     
     def _show_settings(self):
         card = ctk.CTkFrame(self.view_container, fg_color="#1f1f3d", corner_radius=20)
@@ -274,24 +355,30 @@ class AstroSorterApp(ctk.CTk):
         
         ctk.CTkLabel(card, text="Scanning", font=("Segoe UI", 14, "bold"), text_color="#00d9ff").pack(anchor="w", padx=30, pady=(15, 10))
         
-        self.recursive_var = ctk.BooleanVar(value=True)
+        self.recursive_var = ctk.BooleanVar(value=self.settings['recursive'])
         ctk.CTkCheckBox(card, text="Scan subfolders", variable=self.recursive_var,
                        text_color="white", font=("Segoe UI", 12)).pack(anchor="w", padx=30)
         
         ctk.CTkLabel(card, text="Export", font=("Segoe UI", 14, "bold"), text_color="#00d9ff").pack(anchor="w", padx=30, pady=(20, 10))
         
-        self.method_var = ctk.StringVar(value="copy")
+        self.method_var = ctk.StringVar(value=self.settings['export_method'])
         ctk.CTkRadioButton(card, text="Copy files (keep originals)", variable=self.method_var, value="copy",
                           text_color="white").pack(anchor="w", padx=30)
         ctk.CTkRadioButton(card, text="Move files (remove originals)", variable=self.method_var, value="move",
                           text_color="white").pack(anchor="w", padx=30)
         
-        self.json_var = ctk.BooleanVar(value=True)
+        self.json_var = ctk.BooleanVar(value=self.settings['export_json'])
         ctk.CTkCheckBox(card, text="Export JSON report", variable=self.json_var,
                        text_color="white").pack(anchor="w", padx=30, pady=15)
         
         ctk.CTkButton(card, text="Save Settings", fg_color="#e94560", height=40,
-                     command=lambda: messagebox.showinfo("Settings", "Settings saved!")).pack(pady=30)
+                     command=self._save_settings).pack(pady=30)
+    
+    def _save_settings(self):
+        self.settings['recursive'] = self.recursive_var.get()
+        self.settings['export_method'] = self.method_var.get()
+        self.settings['export_json'] = self.json_var.get()
+        messagebox.showinfo("Settings", "Settings saved!")
     
     def _center_window(self):
         self.update_idletasks()
@@ -302,6 +389,7 @@ class AstroSorterApp(ctk.CTk):
     def browse_folder(self):
         folder = filedialog.askdirectory(title="Select folder with images")
         if folder:
+            self.current_directory = folder
             self.process_folder(folder)
     
     def process_folder(self, folder: str):
@@ -314,7 +402,7 @@ class AstroSorterApp(ctk.CTk):
     
     def _process(self, folder: str):
         try:
-            self.results = classify_directory(folder, recursive=self.recursive_var.get(),
+            self.results = classify_directory(folder, recursive=self.settings['recursive'],
                                              progress_callback=self._progress)
             self.after(0, self._done)
         except Exception as e:
@@ -329,6 +417,10 @@ class AstroSorterApp(ctk.CTk):
         
         count = len(self.results)
         self.status_label.configure(text=f"Classified {count} images")
+        
+        # Update home screen
+        if hasattr(self, 'folder_label'):
+            self.folder_label.configure(text=self.current_directory)
         
         self.show_view("files")
         
@@ -372,7 +464,7 @@ class AstroSorterApp(ctk.CTk):
                 counter += 1
             
             try:
-                if self.method_var.get() == "move":
+                if self.settings['export_method'] == 'move':
                     shutil.move(m.filepath, dst_path)
                 else:
                     shutil.copy2(m.filepath, dst_path)
@@ -380,7 +472,7 @@ class AstroSorterApp(ctk.CTk):
                 pass
         
         # JSON
-        if self.json_var.get():
+        if self.settings['export_json']:
             data = {
                 'generated': datetime.now().isoformat(),
                 'version': VERSION,

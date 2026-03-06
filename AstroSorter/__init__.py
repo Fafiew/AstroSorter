@@ -10,7 +10,7 @@ __license__ = "MIT"
 from .classifier import ImageMetadata, ImageType, classify_directory, get_summary
 from .main import main
 
-VERSION = "1.0.4"
+VERSION = "1.0.5"
 
 __all__ = [
     "ImageMetadata",
