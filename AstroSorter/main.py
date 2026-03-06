@@ -3,6 +3,7 @@ AstroSorter - Main Application
 """
 
 import os
+import sys
 import shutil
 import threading
 import json
@@ -13,6 +14,11 @@ from tkinter import ttk, filedialog, messagebox
 from datetime import datetime
 from typing import Optional, List
 from functools import partial
+
+# Handle frozen exe path BEFORE any other imports
+if getattr(sys, 'frozen', False):
+    # Running as compiled exe
+    os.chdir(sys._MEIPASS)
 
 import customtkinter as ctk
 from customtkinter import CTkImage

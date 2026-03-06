@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![AstroSorter Banner](https://img.shields.io/badge/AstroSorter-v1.3.5-00d9ff?style=for-the-badge&logo=python&logoColor=white)
+![AstroSorter Banner](https://img.shields.io/badge/AstroSorter-v1.3.6-00d9ff?style=for-the-badge&logo=python&logoColor=white)
 [![License: MIT](https://img.shields.io/badge/License-MIT-orange.svg)](https://opensource.org/licenses/MIT)
 [![Python Version](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://www.python.org/)
 [![Platform: Windows](https://img.shields.io/badge/Platform-Windows-lightgrey.svg)](https://www.microsoft.com/)
@@ -98,11 +98,14 @@ astropy>=5.3.0
 # Install PyInstaller
 pip install pyinstaller
 
-# Build Windows executable
-pyinstaller --name=AstroSorter --windowed --onefile AstroSorter/main.py
+# Build Windows executable using the spec file (recommended)
+pyinstaller AstroSorter.spec
+
+# Or build without spec file (may require manual hidden imports)
+pyinstaller --name=AstroSorter --windowed --onefile --hiddenimport=customtkinter --hiddenimport=PIL --hiddenimport=rawpy --hiddenimport=numpy --hiddenimport=skimage --hiddenimport=tqdm --hiddenimport=darkdetect --hiddenimport=psutil AstroSorter/main.py
 ```
 
-The executable will be created in the `dist` folder.
+The executable will be created in the `dist/AstroSorter` folder.
 
 ---
 
