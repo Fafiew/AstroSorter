@@ -424,12 +424,17 @@ class AstroSorterApp(ctk.CTk):
                        text_color="white", font=("Segoe UI", 12))
         rename_check.pack(anchor="w", padx=30)
         
-        ctk.CTkLabel(card, text="Pattern (type = Lights/Darks/Flats/Biases, # = counter):",
+        # Tokens help text
+        ctk.CTkLabel(card, text="Available tokens: {type}, {exposure}, {iso}, {mean}, {#}",
                     text_color="#a0a0a0", font=("Segoe UI", 10)).pack(anchor="w", padx=30, pady=(10, 0))
         
+        # Example
+        ctk.CTkLabel(card, text="Examples: {type}_{#} → lights_1 | {type}_{exposure}s_{#} → lights_300s_1",
+                    text_color="#606080", font=("Segoe UI", 9)).pack(anchor="w", padx=30, pady=(2, 5))
+        
         self.rename_pattern_var = ctk.StringVar(value=self.settings['rename_pattern'])
-        pattern_entry = ctk.CTkEntry(card, textvariable=self.rename_pattern_var, width=200,
-                                     placeholder_text="type_#", fg_color="#16213e", border_color="#0f3460")
+        pattern_entry = ctk.CTkEntry(card, textvariable=self.rename_pattern_var, width=250,
+                                     placeholder_text="{type}_{#}", fg_color="#16213e", border_color="#0f3460")
         pattern_entry.pack(anchor="w", padx=30, pady=5)
         
         ctk.CTkButton(card, text="Save", fg_color="#e94560", height=40,
@@ -523,8 +528,15 @@ class AstroSorterApp(ctk.CTk):
                 type_name = m.classified_type.value.lower()
                 counter = counters[m.classified_type]
                 
-                # Replace "type" with actual type and "#" with counter
-                new_name = pattern.replace('type', type_name).replace('#', str(counter))
+                # Replace tokens
+                new_name = pattern
+                new_name = new_name.replace('{type}', type_name)
+                new_name = new_name.replace('{exposure}', str(int(m.exposure_time)) if m.exposure_time else '0')
+                new_name = new_name.replace('{iso}', str(m.iso) if m.iso else '0')
+                new_name = new_name.replace('{mean}', str(int(m.mean)) if m.mean else '0')
+                new_name = new_name.replace('{#}', str(counter))
+                new_name = new_name.replace('#', str(counter))  # Backward compatibility
+                
                 ext = Path(m.filename).suffix
                 dst_path = os.path.join(dst, new_name + ext)
                 counters[m.classified_type] += 1

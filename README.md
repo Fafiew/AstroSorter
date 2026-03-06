@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![AstroSorter Banner](https://img.shields.io/badge/AstroSorter-v1.2.0-00d9ff?style=for-the-badge&logo=python&logoColor=white)
+![AstroSorter Banner](https://img.shields.io/badge/AstroSorter-v1.2.1-00d9ff?style=for-the-badge&logo=python&logoColor=white)
 [![License: MIT](https://img.shields.io/badge/License-MIT-orange.svg)](https://opensource.org/licenses/MIT)
 [![Python Version](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://www.python.org/)
 [![Platform: Windows](https://img.shields.io/badge/Platform-Windows-lightgrey.svg)](https://www.microsoft.com/)
@@ -135,7 +135,7 @@ The executable will be created in the `dist` folder.
 - **Copy**: Keeps original files in place
 - **Move**: Relocates files to sorted folders
 - **JSON Report**: Generates detailed classification report
-- **Rename**: Custom filename pattern (type_# → lights_1, lights_2, darks_1, etc.)
+- **Rename**: Custom filename pattern ({type}_{#}, {type}_{exposure}s_{#}, etc.)
 
 ---
 
