@@ -48,7 +48,7 @@ class AstroSorterApp(ctk.CTk):
         self.type_cards = {}
         
         self.settings = {'recursive': True, 'export_method': 'copy', 'export_json': True,
-                        'rename_enabled': False, 'rename_pattern': 'type_#'}
+                        'rename_enabled': False, 'rename_pattern': '{type}_{#}'}
         
         self._setup_ui()
         self._center_window()
@@ -524,13 +524,23 @@ class AstroSorterApp(ctk.CTk):
         ctk.CTkLabel(card, text="Examples: {type}_{#} → lights_1 | {type}_{exposure}s_{#} → lights_300s_1",
                     text_color="#606080", font=("Segoe UI", 9)).pack(anchor="w", padx=30, pady=(2, 5))
         
-        self.rename_pattern_var = ctk.StringVar(value=self.settings['rename_pattern'])
-        pattern_entry = ctk.CTkEntry(card, textvariable=self.rename_pattern_var, width=250,
-                                     placeholder_text="{type}_{#}", fg_color="#16213e", border_color="#0f3460")
-        pattern_entry.pack(anchor="w", padx=30, pady=5)
+        # Pattern input
+        pattern_frame = ctk.CTkFrame(card, fg_color="transparent")
+        pattern_frame.pack(fill="x", padx=30, pady=5)
+        pattern_frame.grid_columnconfigure(0, weight=1)
         
-        ctk.CTkButton(card, text="Save", fg_color="#e94560", height=40,
-                     command=self._save_settings).pack(pady=30)
+        self.rename_pattern_var = ctk.StringVar(value=self.settings.get('rename_pattern', '{type}_{#}'))
+        pattern_entry = ctk.CTkEntry(pattern_frame, textvariable=self.rename_pattern_var,
+                                     placeholder_text="{type}_{#}", fg_color="#16213e", border_color="#0f3460")
+        pattern_entry.grid(row=0, column=0, sticky="ew")
+        
+        # Save button - scales with window
+        btn_frame = ctk.CTkFrame(card, fg_color="transparent")
+        btn_frame.pack(fill="x", padx=30, pady=30)
+        btn_frame.grid_columnconfigure(0, weight=1)
+        
+        ctk.CTkButton(btn_frame, text="Save", fg_color="#e94560", height=40,
+                     command=self._save_settings).grid(row=0, column=0, sticky="ew")
     
     def _save_settings(self):
         self.settings['recursive'] = self.recursive_var.get()
