@@ -321,18 +321,15 @@ class AstroSorterApp(ctk.CTk):
                 ("iso", "ISO"), ("camera", "Camera"), ("mean", "Mean")]
         
         for col_id, col_name in cols:
-            arrow = " ▲" if self.sort_asc else " ▼" if self.sort_col == col_id else ""
-            new_text = col_name + arrow
-            
-            # Update heading with arrow
+            # Only show arrow for the sorted column
             if self.sort_col == col_id:
-                font = ("Segoe UI", 10, "bold")
+                arrow = " ▲" if self.sort_asc else " ▼"
                 foreground = "#00d9ff"
             else:
-                font = ("Segoe UI", 10, "bold")
+                arrow = ""
                 foreground = "white"
             
-            self.file_tree.heading(col_id, text=new_text, command=partial(self.sort_files, col_id))
+            self.file_tree.heading(col_id, text=col_name + arrow, command=partial(self.sort_files, col_id))
     
     def _populate_file_list(self):
         if not self.file_tree:
