@@ -360,13 +360,16 @@ class AstroSorterApp(ctk.CTk):
         else:
             sorted_results = list(self.results)
         
+        # Store sorted results for lookups
+        self._sorted_results = sorted_results
+        
         for idx, m in enumerate(sorted_results):
             exp_text = f"{m.exposure_time:.1f}s" if m.exposure_time else "-"
             iso_text = str(m.iso) if m.iso else "-"
             cam_text = m.camera_model[:20] if m.camera_model else "-"
             mean_text = f"{m.mean:.1f}" if m.mean else "-"
             
-            self.file_tree.insert("", "end", iid=idx, values=(
+            self.file_tree.insert("", "end", iid=str(idx), values=(
                 m.filename,
                 m.classified_type.value if m.classified_type else "Unknown",
                 exp_text,
@@ -384,10 +387,10 @@ class AstroSorterApp(ctk.CTk):
     def _on_file_select(self, event):
         """Handle file selection in treeview"""
         selection = self.file_tree.selection()
-        if selection:
+        if selection and hasattr(self, '_sorted_results'):
             idx = int(selection[0])
-            if idx < len(self.results):
-                self._show_preview(self.results[idx])
+            if idx < len(self._sorted_results):
+                self._show_preview(self._sorted_results[idx])
     
     def _show_preview(self, metadata: ImageMetadata):
         self.selected_image = metadata
