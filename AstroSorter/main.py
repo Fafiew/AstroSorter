@@ -580,24 +580,33 @@ class AstroSorterApp(ctk.CTk):
     
     def _set_icon(self):
         """Set the application icon"""
-        # Try to find icon in various locations
-        possible_paths = [
-            # Running as script
-            Path(__file__).parent.parent / "assets" / "256.ico",
-            Path(__file__).parent.parent / "assets" / "256.png",
-            # Running as frozen exe
-            Path(sys._MEIPASS) / "assets" / "256.ico" if getattr(sys, 'frozen', False) else None,
-            Path(sys._MEIPASS) / "assets" / "256.png" if getattr(sys, 'frozen', False) else None,
-        ]
+        import sys
         
-        for icon_path in possible_paths:
-            if icon_path and os.path.exists(str(icon_path)):
+        # Determine base path depending on frozen state
+        if getattr(sys, 'frozen', False):
+            base_path = sys._MEIPASS
+        else:
+            base_path = Path(__file__).parent.parent
+        
+        # Try different icon files
+        icon_files = ['256.ico', '256.png', 'fullres.ico', 'fullres.png']
+        
+        for icon_file in icon_files:
+            icon_path = base_path / 'assets' / icon_file
+            if icon_path.exists():
                 try:
-                    # For Windows .ico files
-                    if str(icon_path).endswith('.ico'):
+                    # For .ico files use iconbitmap, for PNG use wm_iconphoto
+                    if icon_file.endswith('.ico'):
                         self.iconbitmap(str(icon_path))
+                    else:
+                        # For PNG, convert to PhotoImage and use
+                        from PIL import Image as PILImage
+                        img = PILImage.open(str(icon_path))
+                        img = img.resize((256, 256), PILImage.LANCZOS)
+                        self.iconphoto(True, ctk.CTkImage(img, size=(256, 256)))
                     break
-                except Exception:
+                except Exception as e:
+                    print(f"Failed to set icon {icon_file}: {e}")
                     pass
     
     def _center_window(self):
