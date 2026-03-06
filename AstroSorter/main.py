@@ -653,33 +653,59 @@ class AstroSorterApp(ctk.CTk):
         if not messagebox.askyesno("Confirm", f"Export {len(self.results)} files?"):
             return
         
-        self.status_label.configure(text="Exporting...")
+        # Disable button during export
+        self.export_btn.configure(state="disabled")
+        
+        # Start export in separate thread
+        thread = threading.Thread(target=self._export, args=(dest,))
+        thread.daemon = True
+        thread.start()
+    
+    def _export(self, dest: str):
+        """Export files in a separate thread with progress tracking"""
+        self.start_time = datetime.now()
+        
+        # Show progress bar
+        self.after(0, lambda: self.progress_frame.pack(side="right", padx=20, fill="x", expand=True))
+        self.after(0, lambda: self.progress_bar.set(0))
         
         folders = {}
         for t in ImageType:
             folders[t] = os.path.join(dest, t.value)
             os.makedirs(folders[t], exist_ok=True)
         
-        # Counters for rename
         counters = {t: 1 for t in ImageType}
+        total = len(self.results)
         
-        for m in self.results:
+        for i, m in enumerate(self.results):
+            # Update progress
+            pct = (i + 1) / total
+            elapsed = (datetime.now() - self.start_time).total_seconds()
+            eta = (elapsed / (i + 1)) * (total - (i + 1)) if (i + 1) > 0 else 0
+            
+            elapsed_str = f"{int(elapsed)}s"
+            eta_str = f"{int(eta)}s" if eta > 0 else "--"
+            
+            self.after(0, lambda p=pct: self.progress_bar.set(p))
+            self.after(0, lambda p=int(pct*100): self.progress_label.configure(text=f"{p}%"))
+            self.after(0, lambda e=elapsed_str, t=eta_str: self.progress_time.configure(text=f"{e} | ETA:{t}"))
+            self.after(0, lambda n=m.filename[:30]: self.status_label.configure(text=f"Exporting: {n}"))
+            
             dst = folders[m.classified_type]
             
-            # Generate filename (rename or original)
+            # Generate filename
             if self.settings['rename_enabled']:
                 pattern = self.settings['rename_pattern']
                 type_name = m.classified_type.value.lower()
                 counter = counters[m.classified_type]
                 
-                # Replace tokens
                 new_name = pattern
                 new_name = new_name.replace('{type}', type_name)
                 new_name = new_name.replace('{exposure}', str(int(m.exposure_time)) if m.exposure_time else '0')
                 new_name = new_name.replace('{iso}', str(m.iso) if m.iso else '0')
                 new_name = new_name.replace('{mean}', str(int(m.mean)) if m.mean else '0')
                 new_name = new_name.replace('{#}', str(counter))
-                new_name = new_name.replace('#', str(counter))  # Backward compatibility
+                new_name = new_name.replace('#', str(counter))
                 
                 ext = Path(m.filename).suffix
                 dst_path = os.path.join(dst, new_name + ext)
@@ -687,7 +713,7 @@ class AstroSorterApp(ctk.CTk):
             else:
                 dst_path = os.path.join(dst, m.filename)
             
-            # Handle filename conflicts
+            # Handle conflicts
             counter = 1
             original_dst = dst_path
             while os.path.exists(dst_path):
@@ -720,12 +746,18 @@ class AstroSorterApp(ctk.CTk):
             with open(os.path.join(dest, 'report.json'), 'w') as f:
                 json.dump(data, f, indent=2)
         
-        self.status_label.configure(text="Export complete")
+        # Hide progress bar
+        self.after(0, lambda: self.progress_frame.pack_forget())
+        
+        # Open folder and show message
+        self.after(0, lambda: self.status_label.configure(text="Export complete"))
         try:
             os.startfile(dest)
         except:
             pass
-        messagebox.showinfo("Done", f"Exported to:\n{dest}")
+        
+        self.after(0, lambda: messagebox.showinfo("Done", f"Exported to:\n{dest}"))
+        self.after(0, lambda: self.export_btn.configure(state="normal"))
 
 
 def main():
