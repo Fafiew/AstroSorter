@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![AstroSorter Banner](https://img.shields.io/badge/AstroSorter-v1.2.1-00d9ff?style=for-the-badge&logo=python&logoColor=white)
+![AstroSorter Banner](https://img.shields.io/badge/AstroSorter-v1.2.2-00d9ff?style=for-the-badge&logo=python&logoColor=white)
 [![License: MIT](https://img.shields.io/badge/License-MIT-orange.svg)](https://opensource.org/licenses/MIT)
 [![Python Version](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://www.python.org/)
 [![Platform: Windows](https://img.shields.io/badge/Platform-Windows-lightgrey.svg)](https://www.microsoft.com/)
@@ -39,7 +39,7 @@ Sort your astrophotography images into calibration types (Lights, Darks, Flats, 
 ### 🖥️ AAA-Level User Interface
 - **Modern Dark Theme**: Cosmic-inspired design with deep space colors
 - **Browse Folder**: Click to select your image folder
-- **Real-time Progress**: See classification progress in real-time
+- **Real-time Progress**: See classification progress in real-time with percentage, elapsed time, and ETA
 - **Detailed Metadata**: View EXIF/FITS metadata for each image
 - **Export Options**: Copy or move files to organized folders
 

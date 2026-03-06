@@ -100,8 +100,26 @@ class AstroSorterApp(ctk.CTk):
         
         self.status = ctk.CTkFrame(self, fg_color="#1a1a2e", height=30, corner_radius=0)
         self.status.grid(row=1, column=0, columnspan=2, sticky="ew")
+        
         self.status_label = ctk.CTkLabel(self.status, text="Ready", text_color="#a0a0a0", font=("Segoe UI", 11))
         self.status_label.pack(side="left", padx=20)
+        
+        # Progress bar (hidden by default)
+        self.progress_frame = ctk.CTkFrame(self.status, fg_color="transparent")
+        self.progress_frame.pack(side="right", padx=20, fill="x", expand=True)
+        self.progress_frame.pack_forget()  # Hide initially
+        
+        self.progress_bar = ctk.CTkProgressBar(self.progress_frame, width=200, height=10)
+        self.progress_bar.pack(side="left", padx=(0, 10))
+        self.progress_bar.set(0)
+        
+        self.progress_label = ctk.CTkLabel(self.progress_frame, text="0%", text_color="#a0a0a0", font=("Segoe UI", 10))
+        self.progress_label.pack(side="left")
+        
+        self.progress_time = ctk.CTkLabel(self.progress_frame, text="", text_color="#606080", font=("Segoe UI", 9))
+        self.progress_time.pack(side="left", padx=(10, 0))
+        
+        self.start_time = None
         
         self.show_view("home")
     
@@ -469,6 +487,13 @@ class AstroSorterApp(ctk.CTk):
         thread.start()
     
     def _process(self, folder: str):
+        # Record start time
+        self.start_time = datetime.now()
+        
+        # Show progress bar
+        self.after(0, lambda: self.progress_frame.pack(side="right", padx=20, fill="x", expand=True))
+        self.after(0, lambda: self.progress_bar.set(0))
+        
         try:
             self.results = classify_directory(folder, recursive=self.settings['recursive'],
                                              progress_callback=self._progress)
@@ -477,11 +502,32 @@ class AstroSorterApp(ctk.CTk):
             self.after(0, lambda err=str(e): self._error(err))
     
     def _progress(self, cur, total, path):
+        # Calculate progress
+        pct = cur / total if total > 0 else 0
+        
+        # Calculate elapsed time
+        elapsed = (datetime.now() - self.start_time).total_seconds() if self.start_time else 0
+        
+        # Calculate ETA
+        if cur > 0 and elapsed > 0:
+            eta = (elapsed / cur) * (total - cur)
+            eta_str = f"ETA: {int(eta)}s"
+        else:
+            eta_str = "ETA: --"
+        
+        elapsed_str = f"Elapsed: {int(elapsed)}s"
+        
+        self.after(0, lambda: self.progress_bar.set(pct))
+        self.after(0, lambda: self.progress_label.configure(text=f"{int(pct * 100)}%"))
+        self.after(0, lambda: self.progress_time.configure(text=f"{elapsed_str} | {eta_str}"))
         self.after(0, lambda: self.status_label.configure(text=f"Processing: {Path(path).name[:30]}"))
     
     def _done(self):
         self.browse_btn.configure(state="normal")
         self.export_btn.configure(state="normal")
+        
+        # Hide progress bar
+        self.progress_frame.pack_forget()
         
         count = len(self.results)
         self.status_label.configure(text=f"Classified {count} images")
