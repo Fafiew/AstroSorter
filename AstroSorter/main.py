@@ -42,6 +42,9 @@ class AstroSorterApp(ctk.CTk):
         self.geometry("1600x900")
         self.minsize(1200, 700)
         
+        # Set app icon
+        self._set_icon()
+        
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("dark-blue")
         self.configure(fg_color="#0d0d1a")
@@ -574,6 +577,28 @@ class AstroSorterApp(ctk.CTk):
         self.settings['rename_enabled'] = self.rename_var.get()
         self.settings['rename_pattern'] = self.rename_pattern_var.get()
         messagebox.showinfo("Settings", "Saved!")
+    
+    def _set_icon(self):
+        """Set the application icon"""
+        # Try to find icon in various locations
+        possible_paths = [
+            # Running as script
+            Path(__file__).parent.parent / "assets" / "256.ico",
+            Path(__file__).parent.parent / "assets" / "256.png",
+            # Running as frozen exe
+            Path(sys._MEIPASS) / "assets" / "256.ico" if getattr(sys, 'frozen', False) else None,
+            Path(sys._MEIPASS) / "assets" / "256.png" if getattr(sys, 'frozen', False) else None,
+        ]
+        
+        for icon_path in possible_paths:
+            if icon_path and os.path.exists(str(icon_path)):
+                try:
+                    # For Windows .ico files
+                    if str(icon_path).endswith('.ico'):
+                        self.iconbitmap(str(icon_path))
+                    break
+                except Exception:
+                    pass
     
     def _center_window(self):
         # Update idle tasks to get correct window size
