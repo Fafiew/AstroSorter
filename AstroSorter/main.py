@@ -175,6 +175,30 @@ class AstroSorterApp(ctk.CTk):
         ctk.CTkLabel(card, text="Supports: CR2, CR3, NEF, ARW, RAF, DNG, FITS, TIFF, JPG, PNG",
                     text_color="#606080", font=("Segoe UI", 10)).pack(pady=(20, 40))
     
+    def _preview_image(self, filepath: str):
+        """Load and return a PIL Image from filepath"""
+        img = None
+        ext = Path(filepath).suffix.lower()
+        
+        try:
+            if ext in {'.cr2', '.cr3', '.nef', '.arw', '.raf', '.dng', '.orf', '.rw2', '.pef'}:
+                try:
+                    import rawpy
+                    with rawpy.imread(filepath) as raw:
+                        rgb = raw.postprocess(use_camera_wb=True, no_auto_bright=True)
+                        img = PILImage.fromarray(rgb)
+                except:
+                    pass
+            
+            if img is None:
+                img = PILImage.open(filepath)
+                
+        except Exception as e:
+            messagebox.showerror("Error", f"Cannot load image: {str(e)}")
+            return None
+        
+        return img
+    
     def _show_files(self):
         if not self.results:
             card = ctk.CTkFrame(self.view_container, fg_color="#1f1f3d", corner_radius=20)
