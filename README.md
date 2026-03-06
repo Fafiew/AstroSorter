@@ -5,7 +5,7 @@
 ![AstroSorter Banner](https://img.shields.io/badge/AstroSorter-v1.0.0-00d9ff?style=for-the-badge&logo=python&logoColor=white)
 [![License: MIT](https://img.shields.io/badge/License-MIT-orange.svg)](https://opensource.org/licenses/MIT)
 [![Python Version](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://www.python.org/)
-[![Platform: Windows](https://img.shields.io/badge/Platform-Windows-lightgrey.svg)](https://www.microsoft.com/windows)
+[![Platform: Windows](https://img.shields.io/badge/Platform-Windows-lightgrey.svg)](https://www.microsoft.com/)
 
 **Automatic Astrophotography Image Classifier**
 
@@ -38,7 +38,7 @@ Sort your astrophotography images into calibration types (Lights, Darks, Flats, 
 
 ### 🖥️ AAA-Level User Interface
 - **Modern Dark Theme**: Cosmic-inspired design with deep space colors
-- **Drag & Drop**: Simply drop your folder to get started
+- **Browse Folder**: Click to select your image folder
 - **Real-time Progress**: See classification progress in real-time
 - **Detailed Metadata**: View EXIF/FITS metadata for each image
 - **Export Options**: Copy or move files to organized folders
@@ -62,18 +62,20 @@ Sort your astrophotography images into calibration types (Lights, Darks, Flats, 
 
 ```bash
 # Clone the repository
-git clone https://github.com/astrosorter/astro-sorter.git
-cd astro-sorter
+git clone https://github.com/Fafiew/AstroSorter.git
+cd AstroSorter
 
 # Create virtual environment (recommended)
 python -m venv venv
+
+# Activate virtual environment
 venv\Scripts\activate
 
 # Install dependencies
 pip install -r requirements.txt
 
 # Run the application
-python -m astro_sorter.main
+python -m AstroSorter.main
 ```
 
 ### Requirements
@@ -87,6 +89,7 @@ scikit-image>=0.21.0
 tqdm>=4.65.0
 darkdetect>=0.8.0
 psutil>=5.9.0
+astropy>=5.3.0
 ```
 
 ### Build Executable
@@ -96,7 +99,7 @@ psutil>=5.9.0
 pip install pyinstaller
 
 # Build Windows executable
-pyinstaller --name=AstroSorter --windowed --onefile astro_sorter/main.py
+pyinstaller --name=AstroSorter --windowed --onefile AstroSorter/main.py
 ```
 
 The executable will be created in the `dist` folder.
@@ -108,10 +111,14 @@ The executable will be created in the `dist` folder.
 ### Getting Started
 
 1. **Launch AstroSorter**
-2. **Drop a folder** containing your astrophotography images onto the drop zone, or click "Browse Folder"
-3. **Wait** for the classification to complete
-4. **Review** the results in the file table
-5. **Export** the sorted files to your desired location
+   ```bash
+   python -m AstroSorter.main
+   ```
+2. **Click the Browse Folder** button or use the drop zone
+3. **Select a folder** containing your astrophotography images
+4. **Wait** for the classification to complete
+5. **Review** the results in the file table
+6. **Export** the sorted files to your desired location
 
 ### Classification Types
 
@@ -180,8 +187,8 @@ DARK:  Exposure > 10s + No object name
 ## 📁 Project Structure
 
 ```
-astro-sorter/
-├── astro_sorter/
+AstroSorter/
+├── AstroSorter/
 │   ├── __init__.py          # Package initialization
 │   ├── main.py              # Main application entry
 │   ├── classifier.py        # Core classification engine
@@ -203,8 +210,8 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 ```bash
 # Clone and setup
-git clone https://github.com/astrosorter/astro-sorter.git
-cd astro-sorter
+git clone https://github.com/Fafiew/AstroSorter.git
+cd AstroSorter
 
 # Install dev dependencies
 pip install -e ".[dev]"
@@ -213,10 +220,10 @@ pip install -e ".[dev]"
 pytest
 
 # Format code
-black astro_sorter/
+black AstroSorter/
 
 # Type checking
-mypy astro_sorter/
+mypy AstroSorter/
 ```
 
 ---

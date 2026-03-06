@@ -124,6 +124,7 @@ class DropZone(ctk.CTkFrame):
     
     def __init__(self, *args, on_drop: Callable = None, **kwargs):
         self.on_drop = on_drop
+        self.browse_callback = None
         
         super().__init__(
             *args,
@@ -135,7 +136,6 @@ class DropZone(ctk.CTkFrame):
         )
         
         self._setup_ui()
-        self._bind_events()
     
     def _setup_ui(self):
         """Setup the drop zone UI"""
@@ -151,7 +151,7 @@ class DropZone(ctk.CTkFrame):
         # Title
         self.title_label = ctk.CTkLabel(
             self,
-            text="Drop Images Here",
+            text="Click to Browse Folder",
             font=ctk.CTkFont(size=Theme.FONT_HEADING, weight="bold"),
             text_color=Theme.TEXT_PRIMARY
         )
@@ -160,7 +160,7 @@ class DropZone(ctk.CTkFrame):
         # Subtitle
         self.subtitle_label = ctk.CTkLabel(
             self,
-            text="or click to browse",
+            text="Select a folder containing your astrophotography images",
             font=ctk.CTkFont(size=Theme.FONT_BODY),
             text_color=Theme.TEXT_SECONDARY
         )
@@ -174,32 +174,21 @@ class DropZone(ctk.CTkFrame):
             text_color=Theme.TEXT_MUTED
         )
         self.formats_label.pack(pady=(20, 40))
-    
-    def _bind_events(self):
-        """Bind drag and drop events"""
-        # Enable drag and drop
-        self.drop_target_register('DND_Files')
-        self.dnd_bind('<<Drop>>', self._on_drop)
         
-        # Click to browse
+        # Make clickable
         self.bind('<Button-1>', self._on_click)
-        self.icon_label.bind('<Button-1>', self._on_click)
-        self.title_label.bind('<Button-1>', self._on_click)
-        self.subtitle_label.bind('<Button-1>', self._on_click)
-    
-    def _on_drop(self, event):
-        """Handle file drop"""
-        if self.on_drop:
-            self.on_drop(event.data)
+        for child in self.winfo_children():
+            if isinstance(child, ctk.CTkLabel):
+                child.bind('<Button-1>', self._on_click)
     
     def _on_click(self, event):
         """Handle click to browse"""
-        # This will be connected to the main app's browse function
-        pass
+        if self.browse_callback:
+            self.browse_callback()
     
     def set_browse_command(self, command: Callable):
         """Set the browse command"""
-        self._browse_command = command
+        self.browse_callback = command
 
 
 class TypeCard(AstroCard):

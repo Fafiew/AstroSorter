@@ -14,10 +14,10 @@ from typing import Optional
 
 import customtkinter as ctk
 
-from .classifier import (
+from AstroSorter.classifier import (
     AstroClassifier, BatchClassifier, ImageMetadata, ImageType
 )
-from .ui_components import (
+from AstroSorter.ui_components import (
     Theme, AstroButton, AstroCard, DropZone, TypeCard, FileTable,
     Sidebar, StatusBar, MetadataPanel, GlassCard
 )
@@ -136,9 +136,9 @@ class AstroSorterApp(ctk.CTk):
         # Drop zone
         self.drop_zone = DropZone(
             self.content_frame,
-            height=300,
-            on_drop=self.handle_drop
+            height=300
         )
+        self.drop_zone.set_browse_command(self.browse_folder)
         self.drop_zone.grid(row=0, column=0, sticky="ew", pady=(0, 20))
         
         # Results container

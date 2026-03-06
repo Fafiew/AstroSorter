@@ -1,5 +1,5 @@
 [project]
-name = "astro-sorter"
+name = "AstroSorter"
 version = "1.0.0"
 description = "Automatic Astrophotography Image Sorter - Classify and sort images into Lights, Darks, Flats, Biases"
 authors = [{name = "AstroSorter Team", email = "hello@astrosorter.app"}]
@@ -38,14 +38,14 @@ dev = [
 ]
 
 [project.scripts]
-astro-sorter = "astro_sorter.main:main"
+AstroSorter = "AstroSorter.main:main"
 
 [build-system]
 requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["astro_sorter"]
+packages = ["AstroSorter"]
 
 [tool.black]
 line-length = 100
