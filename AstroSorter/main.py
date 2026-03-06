@@ -148,7 +148,7 @@ class AstroSorterApp(ctk.CTk):
         ctk.CTkLabel(version_frame, text=f"Current Version: {VERSION}", 
                     text_color="white", font=("Segoe UI", 14)).pack(pady=15, padx=30)
         
-        ctk.CTkLabel(version_frame, text="Latest: 1.1.3", 
+        ctk.CTkLabel(version_frame, text="Latest: 1.1.4", 
                     text_color="#00ff88", font=("Segoe UI", 12)).pack(pady=(0, 15), padx=30)
         
         # Current folder
@@ -260,7 +260,10 @@ class AstroSorterApp(ctk.CTk):
         
         for col_id, col_name in cols:
             if col_id in self.header_buttons:
-                arrow = " ▼" if self.sort_col == col_id else ""
+                if col_id == self.sort_col:
+                    arrow = " ▲" if self.sort_asc else " ▼"
+                else:
+                    arrow = ""
                 color = "#00d9ff" if self.sort_col == col_id else "white"
                 self.header_buttons[col_id].configure(text=col_name + arrow, text_color=color)
     
