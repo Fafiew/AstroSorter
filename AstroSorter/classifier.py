@@ -61,36 +61,38 @@ def read_exif(filepath: str) -> dict:
 def transform_mean(raw_mean: float) -> float:
     """Transform mean brightness to exaggerate differences between image types.
     
-    Astrophotography calibration frames:
-    - Bias: ~0-1 (pitch black, just sensor offset)
-    - Dark: ~1-10 (very dark, noise visible)
-    - Flat: ~30-150 (moderate brightness)
-    - Light: ~50-255 (varies with exposure/lights)
+    Astrophotography reality:
+    - Bias: ~0 (pitch black, shortest exposure)
+    - Dark: ~0-5 (pitch black, same exposure as lights)
+    - Light: ~20-60 (dark sky + bright stars, average is darker)
+    - Flat: ~80-180 (uniform brightness, histogram peak at 1/2 to 1/3)
     
-    This function applies a curve that:
-    - Pushes near-black values (0-10) toward 0
-    - Boosts flat/light values significantly (50+)
+    This function transforms to make classification clear:
+    - Bias/Dark → near 0
+    - Light → moderate (20-60)  
+    - Flat → high (80+)
     """
     if raw_mean is None:
         return None
     
     if raw_mean < 1:
         # Pitch black - bias frames
-        return raw_mean * 0.5  # Keep near 0
-    elif raw_mean < 10:
+        return raw_mean * 0.3  # Keep near 0
+    elif raw_mean < 5:
         # Very dark - dark frames  
-        return raw_mean * 0.8  # Keep low (1-8)
-    elif raw_mean < 30:
-        # Dark to medium - could be dark or flat
-        # Push up slightly
-        return 8 + (raw_mean - 10) * 1.5
-    elif raw_mean < 80:
-        # Medium brightness - flats
-        return 30 + (raw_mean - 30) * 3  # Push toward 50-180
+        return raw_mean * 0.6  # Keep low (1-3)
+    elif raw_mean < 20:
+        # Dark - likely light frames (dark sky with stars)
+        return 3 + raw_mean * 1.2  # ~3-27
+    elif raw_mean < 60:
+        # Light frames (brighter sky or more stars)
+        return 20 + (raw_mean - 20) * 1.5  # ~20-80
+    elif raw_mean < 120:
+        # Medium brightness - flats or bright lights
+        return 60 + (raw_mean - 60) * 2  # ~60-180
     else:
-        # Bright - lights or bright flats
-        # Exaggerate significantly
-        return 80 + (raw_mean - 80) * 2.5  # Push toward 100+
+        # Very bright - likely flats
+        return 100 + (raw_mean - 120) * 1.5  # 100+
 
 
 def get_stats(filepath: str, ext: str) -> dict:
@@ -333,19 +335,19 @@ def classify_directory(directory: str, recursive: bool = True, progress_callback
                 
                 # Evidence 3: Absolute brightness (using transformed mean)
                 if m.mean is not None:
-                    if m.mean < 5:
+                    if m.mean < 2:
                         # Very dark - bias or dark
-                        evidence[ImageType.BIAS] += 2
-                        evidence[ImageType.DARK] += 1
-                    elif m.mean < 15:
-                        # Dark - likely dark frames
+                        evidence[ImageType.BIAS] += 3
                         evidence[ImageType.DARK] += 2
-                    elif 30 < m.mean < 100:
-                        # Medium brightness - flats
-                        evidence[ImageType.FLAT] += 3
-                    elif m.mean >= 100:
-                        # Bright - lights
+                    elif m.mean < 10:
+                        # Dark - likely dark frames
+                        evidence[ImageType.DARK] += 3
+                    elif 20 <= m.mean < 80:
+                        # Moderate brightness - lights
                         evidence[ImageType.LIGHT] += 3
+                    elif m.mean >= 80:
+                        # Bright - flats
+                        evidence[ImageType.FLAT] += 4
             
             # Find best evidence
             best_type = max(evidence, key=evidence.get)
