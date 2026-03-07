@@ -335,9 +335,13 @@ def classify_directory(directory: str, recursive: bool = True, progress_callback
     # Cannot reliably distinguish darks from lights on a per-image basis —
     # both frame types sit at the camera pedestal with nearly the same mean.
     # Light frames have a small but consistent mean elevation from sky background.
+    # Threshold lowered to 1s to support lucky imaging (lights/darks at 5-30s).
+    # Include UNKNOWN frames — these are medium-exposure dark frames that
+    # _classify_single intentionally left unresolved for Phase 2.
     long_exp = [m for m in results
                 if m.filename not in hinted
-                and m.exposure_time is not None and m.exposure_time > 30
+                and m.exposure_time is not None and m.exposure_time > 1
+                and m.classified_type in (ImageType.UNKNOWN, ImageType.LIGHT, ImageType.DARK)
                 and m.mean is not None]
     if long_exp:
         _correct_long_exposure(results, long_exp)
@@ -363,9 +367,9 @@ def _classify_single(m: ImageMetadata) -> tuple:
             return ImageType.UNKNOWN, 0.0
         if exp < 0.1:
             return ImageType.BIAS, 0.70
-        if exp <= 30:
-            return ImageType.FLAT, 0.50
-        return ImageType.UNKNOWN, 0.40  # Long exposure, no stats; Phase 2 will resolve
+        # Do not guess FLAT — medium/long exposures could be lucky imaging lights or darks.
+        # Return UNKNOWN so Phase 2 resolves them via session-level comparison.
+        return ImageType.UNKNOWN, 0.30
 
     # BIAS — camera minimum shutter speed, records only readout noise
     if exp is not None and exp < 0.1:
@@ -378,12 +382,16 @@ def _classify_single(m: ImageMetadata) -> tuple:
 
     # Short-to-medium exposure, dark image
     if exp is not None and exp <= 30:
-        # FLAT_DARK: short exposure + dark + very uniform histogram
-        if px_range < 8 and px_avg < 15:
+        # FLAT_DARK: only for very short exposures (<=3s).
+        # Lucky imaging darks are typically 5-30s — a tight bound stops them
+        # being caught here. Phase 2 will correctly classify them instead.
+        if exp <= 3 and px_range < 8 and px_avg < 15:
             return ImageType.FLAT_DARK, 0.80
         # Moderately bright at short exposure — likely underexposed flat
         if px_avg > 25:
             return ImageType.FLAT, 0.55
+        # Dark at medium exposure: could be lucky imaging dark or flat-dark.
+        # Return UNKNOWN so Phase 2 resolves via session context.
         return ImageType.UNKNOWN, 0.30
 
     # Long exposure (> 30s): tentative only — Phase 2 will overwrite this.
@@ -406,42 +414,60 @@ def _correct_long_exposure(all_results: List, long_exp: List) -> None:
 
     Why this is necessary
     ─────────────────────
-    Dark frames and light frames taken on a deep-sky target share nearly identical
-    pixel statistics per-image. Both are dominated by the camera bias pedestal
-    (the non-zero floor baked into every RAW file, typically 512–1024 ADU on a
-    14-bit sensor). After normalisation to 0-255 this reads as ~7-10 on all dark
-    frame types. Light frames carry this same pedestal PLUS a small sky-background
-    signal and the occasional bright star, lifting the mean by ~1-3 units — barely
-    perceptible per-image but consistent across the session.
+    Dark and light frames share nearly identical pixel statistics per-image — both
+    sit at the camera bias pedestal. Only session-level comparison can separate them.
 
-    Strategy A  (preferred) — bias frames present
-    ─────────────────────────────────────────────
-    Use the mean of the bias frames as the exact camera pedestal. Build a threshold
-    at pedestal + max(6σ_bias, 6% of pedestal). Any long-exposure frame whose mean
-    sits below this line is a dark; anything above is a light.
+    Exposure-time grouping
+    ──────────────────────
+    Frames from different session types (e.g. lucky imaging at 20s and deep-sky at
+    480s) must NOT be mixed in the same cluster analysis — their pedestals and mean
+    offsets differ, so mixing them produces wrong midpoints. We split long_exp into
+    exposure-time groups first: any gap > 4x between consecutive sorted exposure
+    times marks a new group. Each group is classified independently.
 
-    Strategy B — no bias frames available
-    ──────────────────────────────────────
-    Look at the spread of means across all long-exposure frames.
-    • If spread ≥ 5% of minimum mean: two clusters exist. Split at midpoint → darks / lights.
-    • If spread < 5%: single cluster. Use relative std to decide:
-        dark frames are Gaussian thermal noise (low rel_std);
-        light frames have stars and sky gradient (higher rel_std).
+    Per-group strategy
+    ──────────────────
+    Strategy A (preferred) — bias frames present:
+        Threshold = bias_mean + max(6σ, 6% of bias_mean).
+        Below → Dark. Above → Light.
+
+    Strategy B — no bias frames:
+        If mean spread ≥ 5% of group minimum → two clusters, split at largest gap.
+        Else → single cluster, use relative std (darks: low; lights: higher).
     """
-    # ── Strategy A ──────────────────────────────────────────────────────────────
+    if not long_exp:
+        return
+
+    # ── Split into exposure-time groups ─────────────────────────────────────────
+    sorted_frames = sorted(long_exp, key=lambda m: m.exposure_time)
+    groups = [[sorted_frames[0]]]
+    for m in sorted_frames[1:]:
+        # New group when exposure time jumps by more than 4x
+        if m.exposure_time > groups[-1][-1].exposure_time * 4:
+            groups.append([])
+        groups[-1].append(m)
+
     bias_frames = [m for m in all_results
                    if m.classified_type == ImageType.BIAS and m.mean is not None]
-
+    bias_mean = None
+    bias_std  = None
     if bias_frames:
         bias_mean = sum(m.mean for m in bias_frames) / len(bias_frames)
         bias_var  = sum((m.mean - bias_mean) ** 2 for m in bias_frames) / len(bias_frames)
         bias_std  = bias_var ** 0.5
 
-        # Self-calibrating threshold: 6σ or 6% of bias mean, whichever is larger.
-        sigma_margin  = max(bias_std * 6.0, bias_mean * 0.06)
-        dark_threshold = bias_mean + sigma_margin
+    for group in groups:
+        _classify_exposure_group(group, bias_mean, bias_std)
 
-        for m in long_exp:
+
+def _classify_exposure_group(group: List, bias_mean, bias_std) -> None:
+    """Classify one exposure-time group as darks or lights."""
+
+    # ── Strategy A: bias frames available ───────────────────────────────────────
+    if bias_mean is not None and bias_std is not None:
+        sigma_margin   = max(bias_std * 6.0, bias_mean * 0.06)
+        dark_threshold = bias_mean + sigma_margin
+        for m in group:
             if m.mean <= dark_threshold:
                 margin = (dark_threshold - m.mean) / max(sigma_margin, 0.01)
                 m.classified_type = ImageType.DARK
@@ -452,34 +478,36 @@ def _correct_long_exposure(all_results: List, long_exp: List) -> None:
                 m.confidence = min(0.72 + sky_signal, 0.95)
         return
 
-    # ── Strategy B ──────────────────────────────────────────────────────────────
-    means    = sorted(m.mean for m in long_exp)
+    # ── Strategy B: no bias frames ───────────────────────────────────────────────
+    means    = sorted(m.mean for m in group)
     min_mean = means[0]
     max_mean = means[-1]
     spread   = max_mean - min_mean
 
     if spread >= min_mean * 0.05:
-        # Two clusters detected — split at midpoint of range
-        midpoint = (min_mean + max_mean) / 2.0
-        for m in long_exp:
-            if m.mean < midpoint:
+        # Two clusters present — find the largest gap in sorted means and split there.
+        # This is more robust than a simple midpoint when clusters are unequal in size.
+        gaps = [(means[i+1] - means[i], i) for i in range(len(means) - 1)]
+        split_idx = max(gaps, key=lambda x: x[0])[1]
+        split_val = (means[split_idx] + means[split_idx + 1]) / 2.0
+        for m in group:
+            if m.mean <= split_val:
                 m.classified_type = ImageType.DARK
-                m.confidence = min(0.70 + (midpoint - m.mean) / max(spread, 0.1), 0.92)
+                m.confidence = min(0.70 + (split_val - m.mean) / max(spread, 0.01), 0.92)
             else:
                 m.classified_type = ImageType.LIGHT
-                m.confidence = min(0.70 + (m.mean - midpoint) / max(spread, 0.1), 0.92)
+                m.confidence = min(0.70 + (m.mean - split_val) / max(spread, 0.01), 0.92)
     else:
-        # Single cluster — use relative std to determine type.
-        # Dark frames: only Gaussian thermal noise → low rel_std (< 0.08)
-        # Light frames: stars + sky gradient → higher rel_std (> 0.08)
-        valid = [m for m in long_exp if m.std is not None]
+        # Single cluster — use relative std.
+        # Dark frames: Gaussian thermal noise → low rel_std.
+        # Light frames: stars + sky gradient → higher rel_std.
+        valid = [m for m in group if m.std is not None]
         avg_rel_std = (
             sum(m.std / max(m.mean, 1.0) for m in valid) / len(valid)
         ) if valid else 0.0
-
         img_type = ImageType.LIGHT if avg_rel_std > 0.08 else ImageType.DARK
         conf = min(0.50 + abs(avg_rel_std - 0.08) * 3.0, 0.78)
-        for m in long_exp:
+        for m in group:
             m.classified_type = img_type
             m.confidence = conf
 
