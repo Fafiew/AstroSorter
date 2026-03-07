@@ -295,59 +295,51 @@ def classify_directory(directory: str, recursive: bool = True, progress_callback
 
 
 def _score_and_classify(m: ImageMetadata) -> tuple:
-    """Classify using range/average algorithm based on min/max pixels."""
     exp = m.exposure_time
-    mean = m.mean
-    
-    # Get pixel range and average from min/max
-    if m.min_val is not None and m.max_val is not None:
-        px_range = m.max_val - m.min_val
-        px_avg = (m.max_val + m.min_val) / 2.0
+
+    # Use percentile-based range/average to ignore hot pixel outliers.
+    # p99 - p1 gives the true dynamic range without being skewed by single bad pixels.
+    if m.p1 is not None and m.p99 is not None:
+        px_range = m.p99 - m.p1
+        px_avg   = (m.p99 + m.p1) / 2.0
     else:
         px_range = None
-        px_avg = None
-    
-    # Fallback: if stats unavailable, use exposure-time-only classification
+        px_avg   = None
+
+    # Fallback: no pixel stats available, use exposure only
     if px_range is None or px_avg is None:
-        if exp is not None:
-            if exp < 0.1:
-                return ImageType.BIAS, 0.80
-            elif exp > 30:
-                if mean is not None and mean < 20:
-                    return ImageType.DARK, 0.70
-                else:
-                    return ImageType.LIGHT, 0.70
-        return ImageType.UNKNOWN, 0.0
-    
-    # Decision tree - first match wins
-    
-    # BIAS: very low range, very low average, short/no exposure
-    if px_range < 20 and px_avg < 10 and (exp is None or exp < 0.1):
-        # Clear bias: near-zero range and average
-        confidence = min(0.7 + (px_range / 50.0), 0.95)
-        return ImageType.BIAS, confidence
-    
-    # FLAT_DARK: low range, dark, but short exposure like a flat
-    if px_range < 25 and px_avg < 15 and exp is not None and 0.1 <= exp <= 20:
-        confidence = min(0.6 + (15 - px_avg) / 30.0, 0.90)
-        return ImageType.FLAT_DARK, confidence
-    
-    # DARK: low range, dark, long exposure
-    if px_range < 40 and px_avg < 20 and exp is not None and exp > 0.5:
-        confidence = min(0.5 + (20 - px_avg) / 40.0, 0.90)
-        return ImageType.DARK, confidence
-    
-    # FLAT: both brightest and darkest areas are bright (high average)
-    if px_avg > 60 and px_range > 15:
-        confidence = min(0.6 + (px_avg - 60) / 100.0, 0.95)
-        return ImageType.FLAT, confidence
-    
-    # LIGHT: huge range (dark sky to bright stars), but average stays low-moderate
-    if px_range > 60 and px_avg < 80:
-        confidence = min(0.5 + (px_range - 60) / 150.0, 0.95)
-        return ImageType.LIGHT, confidence
-    
-    # No match - unknown
+        if exp is None:
+            return ImageType.UNKNOWN, 0.0
+        if exp < 0.1:
+            return ImageType.BIAS, 0.75
+        if exp <= 20:
+            return ImageType.FLAT, 0.55
+        return ImageType.LIGHT, 0.55
+
+    # BIAS: exposure is near-zero AND image is uniform and dark
+    if exp is not None and exp < 0.1 and px_range < 5 and px_avg < 12:
+        return ImageType.BIAS, 0.97
+
+    # FLAT_DARK: short exposure, dark and uniform (like a flat but no light)
+    if exp is not None and 0.1 <= exp <= 20 and px_range < 10 and px_avg < 15:
+        return ImageType.FLAT_DARK, 0.85
+
+    # FLAT: short-to-medium exposure AND both p1 and p99 are bright (uniform illumination)
+    if exp is not None and exp <= 30 and px_avg > 50 and px_range < 120:
+        conf = min(0.6 + (px_avg - 50) / 150.0, 0.97)
+        return ImageType.FLAT, conf
+
+    # DARK: long exposure, but image is uniformly dark (p99 still low, narrow range)
+    # This is the critical fix: darks have long exposure but tiny p99-p1 range
+    if exp is not None and exp > 10 and px_range < 15 and px_avg < 15:
+        conf = min(0.7 + exp / 1000.0, 0.95)
+        return ImageType.DARK, conf
+
+    # LIGHT: long exposure, wide dynamic range (dark sky p1 + bright star p99)
+    if exp is not None and exp > 10 and px_range > 15:
+        conf = min(0.6 + px_range / 200.0, 0.97)
+        return ImageType.LIGHT, conf
+
     return ImageType.UNKNOWN, 0.0
 
 
