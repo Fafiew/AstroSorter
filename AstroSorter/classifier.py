@@ -246,8 +246,16 @@ def process_image(filepath: str) -> ImageMetadata:
     return m
 
 
+
 def classify_directory(directory: str, recursive: bool = True, progress_callback=None) -> List[ImageMetadata]:
-    """Classify images in a directory using evidence-based scoring."""
+    """
+    Classify astrophotography images using a two-phase approach:
+      Phase 1 — per-image rules (bias, flat, flat-dark are unambiguous from stats alone).
+      Phase 2 — session-level comparison for long-exposure frames, because dark frames and
+                 light frames are pixel-statistically near-identical per image (both dominated
+                 by the camera bias pedestal). Only by comparing frames against each other —
+                 or against bias frames — can we reliably separate them.
+    """
     path = Path(directory)
     files = []
     for ext in IMAGE_EXTENSIONS:
@@ -257,90 +265,197 @@ def classify_directory(directory: str, recursive: bool = True, progress_callback
         else:
             files.extend(path.glob(f'*{ext}'))
             files.extend(path.glob(f'*{ext.upper()}'))
-    
+
     files = list(set(str(f) for f in files))
     results = []
-    
+
     for i, f in enumerate(files):
         m = process_image(f)
         results.append(m)
         if progress_callback:
             progress_callback(i + 1, len(files), f)
-    
-    # Step 1: Apply filename hints (highest priority, confidence 0.99)
+
+    # Phase 1a: Filename hints — highest priority, unambiguous keywords only
+    hinted = set()
     for m in results:
         fn = m.filename.upper()
-        
-        # Check for unambiguous astrophotography keywords only
-        if 'LIGHT' in fn:
-            m.classified_type = ImageType.LIGHT
-            m.confidence = 0.99
-        elif 'FLAT_DARK' in fn or 'FLATDARK' in fn:
+        if 'FLAT_DARK' in fn or 'FLATDARK' in fn:
             m.classified_type = ImageType.FLAT_DARK
             m.confidence = 0.99
+            hinted.add(m.filename)
+        elif 'LIGHT' in fn:
+            m.classified_type = ImageType.LIGHT
+            m.confidence = 0.99
+            hinted.add(m.filename)
         elif 'FLAT' in fn:
             m.classified_type = ImageType.FLAT
             m.confidence = 0.99
+            hinted.add(m.filename)
         elif 'DARK' in fn:
             m.classified_type = ImageType.DARK
             m.confidence = 0.99
+            hinted.add(m.filename)
         elif 'BIAS' in fn or 'OFFSET' in fn:
             m.classified_type = ImageType.BIAS
             m.confidence = 0.99
-        else:
-            # Step 2 & 3: Evidence scoring for images without hints
-            m.classified_type, m.confidence = _score_and_classify(m)
-    
+            hinted.add(m.filename)
+
+    # Phase 1b: Per-image classification for non-hinted images
+    for m in results:
+        if m.filename not in hinted:
+            m.classified_type, m.confidence = _classify_single(m)
+
+    # Phase 2: Session-level correction for long-exposure frames.
+    # Cannot reliably distinguish darks from lights on a per-image basis —
+    # both frame types sit at the camera pedestal with nearly the same mean.
+    # Light frames have a small but consistent mean elevation from sky background.
+    long_exp = [m for m in results
+                if m.filename not in hinted
+                and m.exposure_time is not None and m.exposure_time > 30
+                and m.mean is not None]
+    if long_exp:
+        _correct_long_exposure(results, long_exp)
+
     return results
 
 
-def _score_and_classify(m: ImageMetadata) -> tuple:
-    exp = m.exposure_time
+def _classify_single(m: ImageMetadata) -> tuple:
+    """
+    Per-image classification. Handles bias, flat, and flat-dark unambiguously.
+    Long-exposure frames (darks vs lights) are only tentatively classified here
+    and will be overwritten by the session-level correction in Phase 2.
+    """
+    exp  = m.exposure_time
+    mean = m.mean if m.mean is not None else 0.0
 
-    # Use percentile-based range/average to ignore hot pixel outliers.
-    # p99 - p1 gives the true dynamic range without being skewed by single bad pixels.
-    if m.p1 is not None and m.p99 is not None:
-        px_range = m.p99 - m.p1
-        px_avg   = (m.p99 + m.p1) / 2.0
-    else:
-        px_range = None
-        px_avg   = None
+    px_range = (m.p99 - m.p1) if (m.p1 is not None and m.p99 is not None) else None
+    px_avg   = ((m.p99 + m.p1) / 2.0) if (m.p1 is not None and m.p99 is not None) else None
 
-    # Fallback: no pixel stats available, use exposure only
-    if px_range is None or px_avg is None:
+    # No pixel stats at all — exposure-only fallback
+    if px_range is None:
         if exp is None:
             return ImageType.UNKNOWN, 0.0
         if exp < 0.1:
-            return ImageType.BIAS, 0.75
-        if exp <= 20:
-            return ImageType.FLAT, 0.55
-        return ImageType.LIGHT, 0.55
+            return ImageType.BIAS, 0.70
+        if exp <= 30:
+            return ImageType.FLAT, 0.50
+        return ImageType.UNKNOWN, 0.40  # Long exposure, no stats; Phase 2 will resolve
 
-    # BIAS: exposure is near-zero AND image is uniform and dark
-    if exp is not None and exp < 0.1 and px_range < 5 and px_avg < 12:
+    # BIAS — camera minimum shutter speed, records only readout noise
+    if exp is not None and exp < 0.1:
         return ImageType.BIAS, 0.97
 
-    # FLAT_DARK: short exposure, dark and uniform (like a flat but no light)
-    if exp is not None and 0.1 <= exp <= 20 and px_range < 10 and px_avg < 15:
-        return ImageType.FLAT_DARK, 0.85
+    # FLAT — both ends of the histogram are elevated: even the darkest pixels are bright.
+    # This is the unmistakable signature of a uniformly illuminated flat field.
+    if px_avg > 50:
+        return ImageType.FLAT, min(0.65 + (px_avg - 50) / 200.0, 0.97)
 
-    # FLAT: short-to-medium exposure AND both p1 and p99 are bright (uniform illumination)
-    if exp is not None and exp <= 30 and px_avg > 50 and px_range < 120:
-        conf = min(0.6 + (px_avg - 50) / 150.0, 0.97)
-        return ImageType.FLAT, conf
+    # Short-to-medium exposure, dark image
+    if exp is not None and exp <= 30:
+        # FLAT_DARK: short exposure + dark + very uniform histogram
+        if px_range < 8 and px_avg < 15:
+            return ImageType.FLAT_DARK, 0.80
+        # Moderately bright at short exposure — likely underexposed flat
+        if px_avg > 25:
+            return ImageType.FLAT, 0.55
+        return ImageType.UNKNOWN, 0.30
 
-    # DARK: long exposure, but image is uniformly dark (p99 still low, narrow range)
-    # This is the critical fix: darks have long exposure but tiny p99-p1 range
-    if exp is not None and exp > 10 and px_range < 15 and px_avg < 15:
-        conf = min(0.7 + exp / 1000.0, 0.95)
-        return ImageType.DARK, conf
-
-    # LIGHT: long exposure, wide dynamic range (dark sky p1 + bright star p99)
-    if exp is not None and exp > 10 and px_range > 15:
-        conf = min(0.6 + px_range / 200.0, 0.97)
-        return ImageType.LIGHT, conf
+    # Long exposure (> 30s): tentative only — Phase 2 will overwrite this.
+    # Use std signal as a weak initial estimate.
+    if exp is not None and exp > 30:
+        std = m.std if m.std is not None else 0.0
+        rel_std   = std / max(mean, 1.0)
+        p99_excess = ((m.p99 - mean) / max(mean, 1.0)) if m.p99 is not None else 0.0
+        light_signal = rel_std + p99_excess * 0.5
+        if light_signal > 0.15:
+            return ImageType.LIGHT, 0.55
+        return ImageType.DARK, 0.55
 
     return ImageType.UNKNOWN, 0.0
+
+
+def _correct_long_exposure(all_results: List, long_exp: List) -> None:
+    """
+    Session-level dark vs light correction.
+
+    Why this is necessary
+    ─────────────────────
+    Dark frames and light frames taken on a deep-sky target share nearly identical
+    pixel statistics per-image. Both are dominated by the camera bias pedestal
+    (the non-zero floor baked into every RAW file, typically 512–1024 ADU on a
+    14-bit sensor). After normalisation to 0-255 this reads as ~7-10 on all dark
+    frame types. Light frames carry this same pedestal PLUS a small sky-background
+    signal and the occasional bright star, lifting the mean by ~1-3 units — barely
+    perceptible per-image but consistent across the session.
+
+    Strategy A  (preferred) — bias frames present
+    ─────────────────────────────────────────────
+    Use the mean of the bias frames as the exact camera pedestal. Build a threshold
+    at pedestal + max(6σ_bias, 6% of pedestal). Any long-exposure frame whose mean
+    sits below this line is a dark; anything above is a light.
+
+    Strategy B — no bias frames available
+    ──────────────────────────────────────
+    Look at the spread of means across all long-exposure frames.
+    • If spread ≥ 5% of minimum mean: two clusters exist. Split at midpoint → darks / lights.
+    • If spread < 5%: single cluster. Use relative std to decide:
+        dark frames are Gaussian thermal noise (low rel_std);
+        light frames have stars and sky gradient (higher rel_std).
+    """
+    # ── Strategy A ──────────────────────────────────────────────────────────────
+    bias_frames = [m for m in all_results
+                   if m.classified_type == ImageType.BIAS and m.mean is not None]
+
+    if bias_frames:
+        bias_mean = sum(m.mean for m in bias_frames) / len(bias_frames)
+        bias_var  = sum((m.mean - bias_mean) ** 2 for m in bias_frames) / len(bias_frames)
+        bias_std  = bias_var ** 0.5
+
+        # Self-calibrating threshold: 6σ or 6% of bias mean, whichever is larger.
+        sigma_margin  = max(bias_std * 6.0, bias_mean * 0.06)
+        dark_threshold = bias_mean + sigma_margin
+
+        for m in long_exp:
+            if m.mean <= dark_threshold:
+                margin = (dark_threshold - m.mean) / max(sigma_margin, 0.01)
+                m.classified_type = ImageType.DARK
+                m.confidence = min(0.75 + margin * 0.15, 0.95)
+            else:
+                sky_signal = (m.mean - dark_threshold) / max(bias_mean, 1.0)
+                m.classified_type = ImageType.LIGHT
+                m.confidence = min(0.72 + sky_signal, 0.95)
+        return
+
+    # ── Strategy B ──────────────────────────────────────────────────────────────
+    means    = sorted(m.mean for m in long_exp)
+    min_mean = means[0]
+    max_mean = means[-1]
+    spread   = max_mean - min_mean
+
+    if spread >= min_mean * 0.05:
+        # Two clusters detected — split at midpoint of range
+        midpoint = (min_mean + max_mean) / 2.0
+        for m in long_exp:
+            if m.mean < midpoint:
+                m.classified_type = ImageType.DARK
+                m.confidence = min(0.70 + (midpoint - m.mean) / max(spread, 0.1), 0.92)
+            else:
+                m.classified_type = ImageType.LIGHT
+                m.confidence = min(0.70 + (m.mean - midpoint) / max(spread, 0.1), 0.92)
+    else:
+        # Single cluster — use relative std to determine type.
+        # Dark frames: only Gaussian thermal noise → low rel_std (< 0.08)
+        # Light frames: stars + sky gradient → higher rel_std (> 0.08)
+        valid = [m for m in long_exp if m.std is not None]
+        avg_rel_std = (
+            sum(m.std / max(m.mean, 1.0) for m in valid) / len(valid)
+        ) if valid else 0.0
+
+        img_type = ImageType.LIGHT if avg_rel_std > 0.08 else ImageType.DARK
+        conf = min(0.50 + abs(avg_rel_std - 0.08) * 3.0, 0.78)
+        for m in long_exp:
+            m.classified_type = img_type
+            m.confidence = conf
 
 
 def get_summary(results: List[ImageMetadata]) -> dict:
