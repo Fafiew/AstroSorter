@@ -66,9 +66,13 @@ def get_stats(filepath: str, ext: str) -> dict:
                 import rawpy
                 with rawpy.imread(filepath) as raw:
                     data = raw.raw_image_visible.astype(np.float32)
+                    raw_max = float(np.iinfo(raw.raw_image_visible.dtype).max)
+                    # Normalize to 0-255 range (RAW files are 12 or 14-bit)
+                    if raw_max > 255:
+                        data = (data / raw_max) * 255.0
                     result['mean'] = float(np.mean(data))
                     result['std'] = float(np.std(data))
-                    result['max'] = float(np.max(data))
+                    result['max'] = float(np.minimum(np.max(data), 255))
                     return result
             except ImportError:
                 # rawpy not available, fall through to PIL
@@ -78,11 +82,16 @@ def get_stats(filepath: str, ext: str) -> dict:
                 return result
         
         with Image.open(filepath) as img:
-            gray = img.convert('L')
-            arr = np.array(gray, dtype=np.float32)
+            # Handle 16-bit TIFFs
+            if img.mode == 'I;16':
+                arr = np.array(img, dtype=np.float32)
+                arr = (arr / 65535.0) * 255.0  # Normalize 16-bit to 0-255
+            else:
+                gray = img.convert('L')
+                arr = np.array(gray, dtype=np.float32)
             result['mean'] = float(np.mean(arr))
             result['std'] = float(np.std(arr))
-            result['max'] = float(np.max(arr))
+            result['max'] = float(np.minimum(np.max(arr), 255))
     except Exception as e:
         print(f"[STATS] Failed to process {filepath}: {e}")
     return result
