@@ -82,6 +82,9 @@ def get_stats(filepath: str, ext: str) -> dict:
                     
                     data_scaled = data * scale_factor
                     
+                    # Subsample to ~80k pixels — accurate stats, ~100x faster read
+                    data_scaled = data_scaled.flatten()[::max(1, data_scaled.size // 80000)]
+                    
                     # Calculate stats including min/max for brightness analysis
                     result['mean'] = float(np.mean(data_scaled))
                     result['std'] = float(np.std(data_scaled))
@@ -114,6 +117,9 @@ def get_stats(filepath: str, ext: str) -> dict:
                         data_scaled = ((data - data_min) / (data_max - data_min)) * 255.0
                     else:
                         data_scaled = data - data_min
+                    
+                    # Subsample to ~80k pixels
+                    data_scaled = data_scaled.flatten()[::max(1, data_scaled.size // 80000)]
                     
                     result['mean'] = float(np.mean(data_scaled))
                     result['std'] = float(np.std(data_scaled))
@@ -159,6 +165,9 @@ def get_stats(filepath: str, ext: str) -> dict:
                 gray = img.convert('L')
                 arr = np.array(gray, dtype=np.float32)
             
+            # Subsample to ~80k pixels
+            arr = arr.flatten()[::max(1, arr.size // 80000)]
+
             result['mean'] = float(np.mean(arr))
             result['std'] = float(np.std(arr))
             result['max'] = float(np.minimum(np.max(arr), 255))
@@ -228,7 +237,11 @@ def process_image(filepath: str) -> ImageMetadata:
         finfo = extract_filename_info(path.name)
         if not m.iso and 'iso' in finfo:
             m.iso = finfo['iso']
-        
+
+        # Bias frames are classified purely on exposure time — skip pixel read entirely
+        if m.exposure_time is not None and m.exposure_time < 0.1:
+            return m
+
         stats = get_stats(filepath, ext)
         
         # Store raw (untransformed) stats in metadata
@@ -269,11 +282,24 @@ def classify_directory(directory: str, recursive: bool = True, progress_callback
     files = list(set(str(f) for f in files))
     results = []
 
-    for i, f in enumerate(files):
-        m = process_image(f)
-        results.append(m)
-        if progress_callback:
-            progress_callback(i + 1, len(files), f)
+    # Use all CPU cores as parallel workers.
+    # Falls back to sequential for small batches to avoid process-spawn overhead.
+    if len(files) > 20:
+        from concurrent.futures import ProcessPoolExecutor, as_completed
+        import os
+        max_workers = os.cpu_count() or 4
+        with ProcessPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(process_image, f): f for f in files}
+            for i, future in enumerate(as_completed(futures)):
+                results.append(future.result())
+                if progress_callback:
+                    progress_callback(i + 1, len(files), futures[future])
+    else:
+        for i, f in enumerate(files):
+            m = process_image(f)
+            results.append(m)
+            if progress_callback:
+                progress_callback(i + 1, len(files), f)
 
     # Phase 1a: Filename hints — highest priority, unambiguous keywords only
     hinted = set()
