@@ -92,7 +92,6 @@ def get_stats(filepath: str, ext: str) -> dict:
             # Handle different bit depths properly
             if img.mode == 'I;16':
                 # 16-bit grayscale - convert properly
-                import numpy as np
                 arr = np.array(img, dtype=np.float32)
                 # Normalize to 0-255 based on actual range in the image
                 arr_min, arr_max = arr.min(), arr.max()
@@ -102,7 +101,6 @@ def get_stats(filepath: str, ext: str) -> dict:
                     arr = arr - arr_min
             elif img.mode == 'I':
                 # 32-bit grayscale
-                import numpy as np
                 arr = np.array(img, dtype=np.float32)
                 arr_min, arr_max = arr.min(), arr.max()
                 if arr_max > arr_min:
