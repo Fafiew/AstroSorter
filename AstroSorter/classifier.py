@@ -60,81 +60,6 @@ def read_exif(filepath: str) -> dict:
     return result
 
 
-def transform_mean(raw_mean: float, min_val: float, max_val: float, range_val: float) -> float:
-    """Transform brightness values to exaggerate differences between image types.
-    
-    Astrophotography reality:
-    - Bias: ~0 (pitch black), range ~0 (no contrast)
-    - Dark: ~0-5 (pitch black), range ~0-10 (low contrast)  
-    - Light: min near 0 (dark sky), max near 255 (bright stars), high range
-    - Flat: min ~30-80, max ~150-255, average bright, moderate-high range
-    
-    This function uses min, max, and range to classify:
-    - Bias/Dark: min near 0, range very low → output ~0
-    - Light: min near 0, max can be bright → output based on max/range
-    - Flat: min and max both bright → output high
-    """
-    if raw_mean is None:
-        return None
-    
-    # Default if stats unavailable
-    if min_val is None or max_val is None or range_val is None:
-        return raw_mean
-    
-    # Handle edge cases
-    if range_val < 1:
-        # Very low range - likely bias or dark (uniform black)
-        if raw_mean < 5:
-            return raw_mean * 0.3  # Keep near 0
-        else:
-            return raw_mean * 0.5  # Keep low
-    
-    # Calculate normalized brightness metrics
-    # low_ratio: what fraction is in the dark end
-    low_ratio = min_val / 255.0  # Higher = more dark content
-    
-    # Bright content ratio
-    bright_ratio = max_val / 255.0  # Higher = has bright content
-    
-    # Mid-tone presence (content in middle brightness)
-    mid_ratio = 1.0 - low_ratio - bright_ratio
-    
-    # Classification based on these metrics
-    
-    # Case 1: Very dark images (bias/dark frames)
-    if max_val < 10:
-        return min_val * 0.5  # Keep near 0
-    
-    # Case 2: Dark with some bright stars (lights)
-    # - min is low (dark sky)
-    # - max is high (bright stars)
-    # - range is high
-    if low_ratio > 0.3 and bright_ratio > 0.3 and range_val > 50:
-        # Has both dark and bright content - likely LIGHT frames
-        return 20 + (bright_ratio * 60)  # ~30-80
-    
-    # Case 3: Uniform bright (flats)
-    # - min is moderate to high
-    # - range is moderate
-    if min_val > 30 and range_val < 100:
-        # Uniform brightness - likely FLAT
-        return min_val + 50  # Push higher
-    
-    # Case 4: Very bright uniform (flats)
-    if min_val > 80:
-        return min_val + 30  # Keep high
-    
-    # Case 5: Low contrast dark (dark/bias)
-    if range_val < 20:
-        if raw_mean < 10:
-            return raw_mean * 0.5  # Near black
-        else:
-            return raw_mean * 0.7  # Keep low
-    
-    # Default fallback
-    return raw_mean
-
-
 def get_stats(filepath: str, ext: str) -> dict:
     result = {'mean': None, 'std': None, 'max': None, 'min': None, 'range': None}
     try:
@@ -167,6 +92,35 @@ def get_stats(filepath: str, ext: str) -> dict:
                 pass
             except Exception as e:
                 print(f"[RAW] Failed to read {filepath}: {e}")
+                return result
+        
+        if ext in FITS_EXTENSIONS:
+            try:
+                import numpy as np
+                from astropy.io import fits
+                with fits.open(filepath) as hdul:
+                    # Get primary HDU data
+                    data = hdul[0].data.astype(np.float32)
+                    if data is None:
+                        raise ValueError("No data in FITS file")
+                    
+                    # Normalize to 0-255 based on actual range
+                    data_min, data_max = np.min(data), np.max(data)
+                    if data_max > data_min:
+                        data_scaled = ((data - data_min) / (data_max - data_min)) * 255.0
+                    else:
+                        data_scaled = data - data_min
+                    
+                    result['mean'] = float(np.mean(data_scaled))
+                    result['std'] = float(np.std(data_scaled))
+                    result['max'] = float(np.minimum(np.max(data_scaled), 255))
+                    result['min'] = float(np.min(data_scaled))
+                    result['range'] = result['max'] - result['min']
+                    return result
+            except ImportError:
+                print(f"[FITS] astropy not installed for {filepath}")
+            except Exception as e:
+                print(f"[FITS] Failed to read {filepath}: {e}")
                 return result
         
         with Image.open(filepath) as img:
@@ -269,15 +223,11 @@ def process_image(filepath: str) -> ImageMetadata:
         
         stats = get_stats(filepath, ext)
         
-        # Use min, max, and range for better classification
-        # Transform to exaggerate differences between image types
+        # Store raw (untransformed) stats in metadata
         m.min_val = stats['min']
         m.max_val = stats['max']
         m.range_val = stats['range']
-        
-        # New classification using min, max, range
-        m.mean = transform_mean(stats['mean'], stats['min'], stats['max'], stats['range'])
-        
+        m.mean = stats['mean']  # Raw mean, not transformed
         m.std = stats['std']
         
     except Exception as e:
@@ -287,6 +237,7 @@ def process_image(filepath: str) -> ImageMetadata:
 
 
 def classify_directory(directory: str, recursive: bool = True, progress_callback=None) -> List[ImageMetadata]:
+    """Classify images in a directory using evidence-based scoring."""
     path = Path(directory)
     files = []
     for ext in IMAGE_EXTENSIONS:
@@ -306,132 +257,124 @@ def classify_directory(directory: str, recursive: bool = True, progress_callback
         if progress_callback:
             progress_callback(i + 1, len(files), f)
     
-    # Collect all filename hints FIRST
+    # Step 1: Apply filename hints (highest priority, confidence 0.99)
     for m in results:
         fn = m.filename.upper()
         
-        # Check filename for type hints
-        m._filename_hint = None
-        if 'FLAT' in fn or 'F_' in fn or '_F.' in fn:
-            m._filename_hint = ImageType.FLAT
-        elif 'FLAT_DARK' in fn or 'FD_' in fn:
-            m._filename_hint = ImageType.FLAT_DARK
-        elif 'BIAS' in fn or 'OFFSET' in fn or 'B_' in fn or '_B.' in fn:
-            m._filename_hint = ImageType.BIAS
-        elif 'DARK' in fn or 'D_' in fn or '_D.' in fn:
-            m._filename_hint = ImageType.DARK
-        elif 'LIGHT' in fn or 'L_' in fn or '_L.' in fn or 'NGC' in fn or 'M42' in fn or 'IC' in fn:
-            m._filename_hint = ImageType.LIGHT
-    
-    # Get images to classify (those without filename hints or all for scoring)
-    unclassified = [m for m in results if m._filename_hint is None]
-    
-    # Group by ISO for fair comparison
-    iso_groups: Dict[int, List[ImageMetadata]] = {}
-    for m in unclassified:
-        iso_key = m.iso if m.iso else 0
-        if iso_key not in iso_groups:
-            iso_groups[iso_key] = []
-        iso_groups[iso_key].append(m)
-    
-    # Classify each ISO group using evidence-based scoring
-    for iso_key, images in iso_groups.items():
-        if not images:
-            continue
-        
-        # Calculate group statistics for comparison
-        means = [m.mean for m in images if m.mean is not None]
-        exposures = [m.exposure_time for m in images if m.exposure_time is not None]
-        
-        if not means and not exposures:
-            for m in images:
-                m.classified_type = ImageType.UNKNOWN
-                m.confidence = 0.0
-            continue
-        
-        group_mean = sum(means) / len(means) if means else 128
-        group_std = (sum((x - group_mean) ** 2 for x in means) / len(means)) ** 0.5 if means else 50
-        
-        # Calculate evidence scores for each image
-        for m in images:
-            evidence = {ImageType.LIGHT: 0, ImageType.DARK: 0, ImageType.FLAT: 0, 
-                      ImageType.BIAS: 0, ImageType.FLAT_DARK: 0}
-            
-            # Evidence 1: Exposure time
-            exp = m.exposure_time
-            if exp is not None:
-                if exp < 0.01:  # < 10ms = very likely bias
-                    evidence[ImageType.BIAS] += 3
-                elif exp < 0.1:  # < 100ms = likely flat
-                    evidence[ImageType.FLAT] += 2
-                elif exp > 1.0:  # > 1s = likely light
-                    evidence[ImageType.LIGHT] += 2
-                else:
-                    evidence[ImageType.FLAT] += 1
-            
-            # Evidence 2: Mean brightness vs group
-            if m.mean is not None:
-                z = (m.mean - group_mean) / max(group_std, 1)
-                
-                if z > 1.5:  # Much brighter than average
-                    evidence[ImageType.LIGHT] += 2
-                    evidence[ImageType.DARK] -= 1
-                elif z > 0.5:
-                    evidence[ImageType.LIGHT] += 1
-                elif z < -1.5:  # Much darker than average
-                    evidence[ImageType.DARK] += 2
-                    evidence[ImageType.LIGHT] -= 1
-                elif z < -0.5:
-                    evidence[ImageType.DARK] += 1
-                
-                # Evidence 3: Absolute brightness (using transformed mean)
-                if m.mean is not None:
-                    if m.mean < 2:
-                        # Very dark - bias or dark
-                        evidence[ImageType.BIAS] += 3
-                        evidence[ImageType.DARK] += 2
-                    elif m.mean < 10:
-                        # Dark - likely dark frames
-                        evidence[ImageType.DARK] += 3
-                    elif 20 <= m.mean < 80:
-                        # Moderate brightness - lights
-                        evidence[ImageType.LIGHT] += 3
-                    elif m.mean >= 80:
-                        # Bright - flats
-                        evidence[ImageType.FLAT] += 4
-                
-                # Evidence 4: Using min/max/range (the actual algorithm)
-                if m.min_val is not None and m.range_val is not None:
-                    # Dark/Bias: range very low (uniform black)
-                    if m.range_val < 15:
-                        evidence[ImageType.BIAS] += 3
-                        evidence[ImageType.DARK] += 2
-                    # Light: has both dark (sky) and bright (stars) - high range
-                    elif m.range_val > 80 and m.min_val < 50:
-                        evidence[ImageType.LIGHT] += 3
-                    # Flats: moderate range but minimum is bright
-                    elif m.min_val > 40 and m.range_val < 100:
-                        evidence[ImageType.FLAT] += 3
-            
-            # Find best evidence
-            best_type = max(evidence, key=evidence.get)
-            best_score = evidence[best_type]
-            
-            if best_score > 0:
-                m.classified_type = best_type
-                # Normalize confidence: score / max possible
-                m.confidence = min(best_score / 5.0, 0.9)
-            else:
-                m.classified_type = ImageType.UNKNOWN
-                m.confidence = 0.0
-    
-    # Now apply filename hints with HIGH confidence (they're user-provided)
-    for m in results:
-        if m._filename_hint is not None:
-            m.classified_type = m._filename_hint
-            m.confidence = 0.99  # Filename hints are most reliable
+        # Check for unambiguous astrophotography keywords only
+        if 'LIGHT' in fn:
+            m.classified_type = ImageType.LIGHT
+            m.confidence = 0.99
+        elif 'FLAT_DARK' in fn or 'FLATDARK' in fn:
+            m.classified_type = ImageType.FLAT_DARK
+            m.confidence = 0.99
+        elif 'FLAT' in fn:
+            m.classified_type = ImageType.FLAT
+            m.confidence = 0.99
+        elif 'DARK' in fn:
+            m.classified_type = ImageType.DARK
+            m.confidence = 0.99
+        elif 'BIAS' in fn or 'OFFSET' in fn:
+            m.classified_type = ImageType.BIAS
+            m.confidence = 0.99
+        else:
+            # Step 2 & 3: Evidence scoring for images without hints
+            m.classified_type, m.confidence = _score_and_classify(m)
     
     return results
+
+
+def _score_and_classify(m: ImageMetadata) -> tuple:
+    """Score and classify a single image using evidence-based rules."""
+    evidence = {ImageType.LIGHT: 0, ImageType.DARK: 0, ImageType.FLAT: 0, 
+                ImageType.BIAS: 0, ImageType.FLAT_DARK: 0}
+    
+    exp = m.exposure_time
+    mean = m.mean
+    std = m.std
+    range_val = m.range_val
+    
+    # Exposure time evidence (strongest single signal)
+    if exp is not None:
+        if exp <= 0.002:  # ≤ 1/500s
+            evidence[ImageType.BIAS] += 4
+        elif exp <= 0.03:  # ≤ 1/30s
+            evidence[ImageType.BIAS] += 2
+            evidence[ImageType.FLAT] += 1
+        elif exp <= 15:  # ≤ 15s
+            evidence[ImageType.FLAT] += 2
+        elif exp > 30:  # > 30s
+            evidence[ImageType.LIGHT] += 3
+            evidence[ImageType.DARK] += 2
+        if exp > 120:  # > 2 min
+            evidence[ImageType.LIGHT] += 4
+    
+    # Mean brightness evidence (raw mean)
+    if mean is not None:
+        if mean < 3:
+            evidence[ImageType.BIAS] += 3
+            evidence[ImageType.DARK] += 2
+        elif mean < 15:
+            evidence[ImageType.DARK] += 3
+            evidence[ImageType.BIAS] += 1
+        elif mean < 40:
+            evidence[ImageType.DARK] += 1
+            evidence[ImageType.LIGHT] += 1
+        elif mean < 80:
+            evidence[ImageType.LIGHT] += 2
+        elif mean >= 80:
+            evidence[ImageType.FLAT] += 4
+            evidence[ImageType.LIGHT] += 1
+    
+    # Standard deviation evidence
+    if std is not None:
+        if std < 2:
+            evidence[ImageType.BIAS] += 3
+            evidence[ImageType.DARK] += 1
+        elif std < 8:
+            evidence[ImageType.DARK] += 2
+        elif std < 20:
+            evidence[ImageType.FLAT] += 2
+            evidence[ImageType.LIGHT] += 1
+        elif std >= 20:
+            evidence[ImageType.LIGHT] += 3
+    
+    # Pixel range evidence
+    if range_val is not None:
+        if range_val < 10:
+            evidence[ImageType.BIAS] += 3
+            evidence[ImageType.DARK] += 1
+        elif range_val < 30:
+            evidence[ImageType.DARK] += 2
+        elif range_val < 80:
+            evidence[ImageType.FLAT] += 2
+        elif range_val >= 150:
+            evidence[ImageType.LIGHT] += 3
+    
+    # FLAT_DARK detection - dark frames at flat exposure lengths
+    if exp is not None and mean is not None:
+        if exp <= 15 and mean < 20:
+            # This could be a flat-dark (dark frame at flat exposure)
+            evidence[ImageType.FLAT_DARK] += 2
+    
+    # Find winning type
+    # Sort by score descending, then by preference order BIAS > DARK > FLAT > LIGHT > FLAT_DARK
+    preference_order = [ImageType.BIAS, ImageType.DARK, ImageType.FLAT, ImageType.LIGHT, ImageType.FLAT_DARK]
+    
+    sorted_types = sorted(evidence.items(), key=lambda x: (-x[1], preference_order.index(x[0])))
+    winning_type, winning_score = sorted_types[0]
+    _, second_score = sorted_types[1]
+    
+    if winning_score == 0:
+        return ImageType.UNKNOWN, 0.0
+    
+    # Confidence: winning_score / (winning_score + second_score), clamped 0.0-0.99
+    if second_score > 0:
+        confidence = min(winning_score / (winning_score + second_score), 0.99)
+    else:
+        confidence = 0.99 if winning_score > 0 else 0.0
+    
+    return winning_type, confidence
 
 
 def get_summary(results: List[ImageMetadata]) -> dict:
