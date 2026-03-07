@@ -65,6 +65,9 @@ class AstroSorterApp(ctk.CTk):
                         'rename_enabled': False, 'rename_pattern': '{type}_{#}'}
         
         self._setup_ui()
+        
+        # Center window after UI is set up
+        self.update_idletasks()
         self._center_window()
     
     def _setup_ui(self):
@@ -605,21 +608,26 @@ class AstroSorterApp(ctk.CTk):
                     pass
     
     def _center_window(self):
-        # Update idle tasks to get correct window size
+        """Center the window on the screen"""
         self.update_idletasks()
         
         # Get screen dimensions
         screen_width = self.winfo_screenwidth()
         screen_height = self.winfo_screenheight()
         
-        # Get window dimensions
-        win_width = self.winfo_width()
-        win_height = self.winfo_height()
+        # Get configured window size
+        win_width = 1600
+        win_height = 900
         
-        # If window dimensions are still 0, use default size
-        if win_width == 0 or win_height == 0:
-            win_width = 1600
-            win_height = 900
+        # Try to get actual window size
+        try:
+            actual_width = self.winfo_width()
+            actual_height = self.winfo_height()
+            if actual_width > 0 and actual_height > 0:
+                win_width = actual_width
+                win_height = actual_height
+        except:
+            pass
         
         # Calculate center position
         x = (screen_width - win_width) // 2
