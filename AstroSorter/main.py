@@ -842,9 +842,13 @@ class AstroSorterApp(ctk.CTk):
 
 
 def main():
+    import multiprocessing
+    multiprocessing.freeze_support()
     app = AstroSorterApp()
     app.mainloop()
 
 
 if __name__ == "__main__":
+    import multiprocessing
+    multiprocessing.freeze_support()
     main()
