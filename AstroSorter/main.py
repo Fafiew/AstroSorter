@@ -342,6 +342,12 @@ class AstroSorterApp(ctk.CTk):
         
         ctk.CTkLabel(preview, text="Preview", font=("Segoe UI", 14, "bold"), text_color="white").pack(pady=(15, 5))
         
+        # Progress bar for preview loading
+        self.preview_progress = ctk.CTkProgressBar(preview, width=200, height=4)
+        self.preview_progress.pack(pady=(20, 5))
+        self.preview_progress.start()
+        self.preview_progress.pack_forget()  # Hidden by default
+        
         self.preview_label = ctk.CTkLabel(preview, text="Click image to preview", text_color="#606080", font=("Segoe UI", 11))
         self.preview_label.pack(pady=20)
         
@@ -429,23 +435,42 @@ class AstroSorterApp(ctk.CTk):
     def _show_preview(self, metadata: ImageMetadata):
         self.selected_image = metadata
         
-        try:
-            img = self._preview_image(metadata.filepath)
+        # Show loading state
+        self.preview_label.configure(text="Loading...", text_color="#606080", image=None)
+        self.preview_progress.pack(pady=(20, 5))
+        self.preview_progress.start()
+        
+        # Load in background thread
+        def load_preview():
+            try:
+                img = self._preview_image(metadata.filepath)
+                self.after(0, lambda: self._display_preview(img, metadata))
+            except Exception as e:
+                self.after(0, lambda: self._preview_error(str(e)))
+        
+        threading.Thread(target=load_preview, daemon=True).start()
+    
+    def _display_preview(self, img, metadata):
+        self.preview_progress.stop()
+        self.preview_progress.pack_forget()
+        
+        if img:
+            img.thumbnail((350, 280))
+            ctk_img = CTkImage(img, size=img.size)
+            self.preview_label.configure(image=ctk_img, text="")
+            self.preview_label.image = ctk_img
             
-            if img:
-                img.thumbnail((350, 280))
-                ctk_img = CTkImage(img, size=img.size)
-                self.preview_label.configure(image=ctk_img, text="")
-                self.preview_label.image = ctk_img
-                
-                info = f"File: {metadata.filename}\n"
-                info += f"Type: {metadata.classified_type.value}\n"
-                info += f"Exp: {metadata.exposure_time if metadata.exposure_time else '-'}s\n"
-                info += f"ISO: {metadata.iso if metadata.iso else '-'}\n"
-                info += f"Mean: {metadata.mean if metadata.mean else '-'}"
-                self.preview_info.configure(text=info)
-        except Exception as e:
-            self.preview_label.configure(text=f"Cannot load:\n{str(e)[:50]}", image=None)
+            info = f"File: {metadata.filename}\n"
+            info += f"Type: {metadata.classified_type.value}\n"
+            info += f"Exp: {metadata.exposure_time if metadata.exposure_time else '-'}s\n"
+            info += f"ISO: {metadata.iso if metadata.iso else '-'}\n"
+            info += f"Mean: {metadata.mean if metadata.mean else '-'}"
+            self.preview_info.configure(text=info)
+    
+    def _preview_error(self, error_msg):
+        self.preview_progress.stop()
+        self.preview_progress.pack_forget()
+        self.preview_label.configure(text=f"Cannot load:\n{error_msg[:50]}", image=None)
     
     def sort_files(self, col: str):
         if self.sort_col == col:
