@@ -53,8 +53,8 @@ def read_exif(filepath: str) -> dict:
         with open(filepath, 'rb') as f:
             for tag, value in exifread.process_file(f, details=False).items():
                 result[tag] = str(value)
-    except:
-        pass
+    except Exception as e:
+        print(f"[EXIF] Failed to read {filepath}: {e}")
     return result
 
 
@@ -70,8 +70,12 @@ def get_stats(filepath: str, ext: str) -> dict:
                     result['std'] = float(np.std(data))
                     result['max'] = float(np.max(data))
                     return result
-            except:
+            except ImportError:
+                # rawpy not available, fall through to PIL
                 pass
+            except Exception as e:
+                print(f"[RAW] Failed to read {filepath}: {e}")
+                return result
         
         with Image.open(filepath) as img:
             gray = img.convert('L')
@@ -79,8 +83,8 @@ def get_stats(filepath: str, ext: str) -> dict:
             result['mean'] = float(np.mean(arr))
             result['std'] = float(np.std(arr))
             result['max'] = float(np.max(arr))
-    except:
-        pass
+    except Exception as e:
+        print(f"[STATS] Failed to process {filepath}: {e}")
     return result
 
 
@@ -121,16 +125,16 @@ def process_image(filepath: str) -> ImageMetadata:
                     else:
                         m.exposure_time = float(val)
                     break
-                except:
-                    pass
+                except (ValueError, TypeError) as e:
+                    print(f"[EXIF] Failed to parse exposure time: {e}")
         
         for tag in ['EXIF ISOSpeedRatings', 'Image ISOSpeedRatings']:
             if tag in exif:
                 try:
                     m.iso = int(exif[tag])
                     break
-                except:
-                    pass
+                except (ValueError, TypeError) as e:
+                    print(f"[EXIF] Failed to parse ISO: {e}")
         
         if 'Image Model' in exif:
             m.camera_model = exif['Image Model']

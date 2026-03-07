@@ -228,8 +228,11 @@ class AstroSorterApp(ctk.CTk):
                     with rawpy.imread(filepath) as raw:
                         rgb = raw.postprocess(use_camera_wb=True, no_auto_bright=True)
                         img = PILImage.fromarray(rgb)
-                except:
+                except ImportError:
+                    # rawpy not available
                     pass
+                except Exception as e:
+                    print(f"[PREVIEW] Failed to load RAW {filepath}: {e}")
             
             if img is None:
                 img = PILImage.open(filepath)
@@ -482,8 +485,8 @@ class AstroSorterApp(ctk.CTk):
                                 )
                     self.after(0, update_label)
                     return
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[UPDATE] Failed to check for updates: {e}")
         
         # Fallback - show error or use current version
         def update_error():
@@ -777,8 +780,8 @@ class AstroSorterApp(ctk.CTk):
                     shutil.move(m.filepath, dst_path)
                 else:
                     shutil.copy2(m.filepath, dst_path)
-            except:
-                pass
+            except Exception as e:
+                print(f"[EXPORT] Failed to {self.settings['export_method']} {m.filename}: {e}")
         
         if self.settings['export_json']:
             data = {
@@ -798,8 +801,8 @@ class AstroSorterApp(ctk.CTk):
         self.after(0, lambda: self.status_label.configure(text="Export complete"))
         try:
             os.startfile(dest)
-        except:
-            pass
+        except Exception as e:
+            print(f"[EXPORT] Could not open folder: {e}")
         
         self.after(0, lambda: messagebox.showinfo("Done", f"Exported to:\n{dest}"))
         self.after(0, lambda: self.export_btn.configure(state="normal"))
