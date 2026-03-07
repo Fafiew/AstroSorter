@@ -285,96 +285,60 @@ def classify_directory(directory: str, recursive: bool = True, progress_callback
 
 
 def _score_and_classify(m: ImageMetadata) -> tuple:
-    """Score and classify a single image using evidence-based rules."""
-    evidence = {ImageType.LIGHT: 0, ImageType.DARK: 0, ImageType.FLAT: 0, 
-                ImageType.BIAS: 0, ImageType.FLAT_DARK: 0}
-    
+    """Classify using range/average algorithm based on min/max pixels."""
     exp = m.exposure_time
     mean = m.mean
-    std = m.std
-    range_val = m.range_val
     
-    # Exposure time evidence (strongest single signal)
-    if exp is not None:
-        if exp <= 0.002:  # ≤ 1/500s
-            evidence[ImageType.BIAS] += 4
-        elif exp <= 0.03:  # ≤ 1/30s
-            evidence[ImageType.BIAS] += 2
-            evidence[ImageType.FLAT] += 1
-        elif exp <= 15:  # ≤ 15s
-            evidence[ImageType.FLAT] += 2
-        elif exp > 30:  # > 30s
-            evidence[ImageType.LIGHT] += 3
-            evidence[ImageType.DARK] += 2
-        if exp > 120:  # > 2 min
-            evidence[ImageType.LIGHT] += 4
+    # Get pixel range and average from min/max
+    if m.min_val is not None and m.max_val is not None:
+        px_range = m.max_val - m.min_val
+        px_avg = (m.max_val + m.min_val) / 2.0
+    else:
+        px_range = None
+        px_avg = None
     
-    # Mean brightness evidence (raw mean)
-    if mean is not None:
-        if mean < 3:
-            evidence[ImageType.BIAS] += 3
-            evidence[ImageType.DARK] += 2
-        elif mean < 15:
-            evidence[ImageType.DARK] += 3
-            evidence[ImageType.BIAS] += 1
-        elif mean < 40:
-            evidence[ImageType.DARK] += 1
-            evidence[ImageType.LIGHT] += 1
-        elif mean < 80:
-            evidence[ImageType.LIGHT] += 2
-        elif mean >= 80:
-            evidence[ImageType.FLAT] += 4
-            evidence[ImageType.LIGHT] += 1
-    
-    # Standard deviation evidence
-    if std is not None:
-        if std < 2:
-            evidence[ImageType.BIAS] += 3
-            evidence[ImageType.DARK] += 1
-        elif std < 8:
-            evidence[ImageType.DARK] += 2
-        elif std < 20:
-            evidence[ImageType.FLAT] += 2
-            evidence[ImageType.LIGHT] += 1
-        elif std >= 20:
-            evidence[ImageType.LIGHT] += 3
-    
-    # Pixel range evidence
-    if range_val is not None:
-        if range_val < 10:
-            evidence[ImageType.BIAS] += 3
-            evidence[ImageType.DARK] += 1
-        elif range_val < 30:
-            evidence[ImageType.DARK] += 2
-        elif range_val < 80:
-            evidence[ImageType.FLAT] += 2
-        elif range_val >= 150:
-            evidence[ImageType.LIGHT] += 3
-    
-    # FLAT_DARK detection - dark frames at flat exposure lengths
-    if exp is not None and mean is not None:
-        if exp <= 15 and mean < 20:
-            # This could be a flat-dark (dark frame at flat exposure)
-            evidence[ImageType.FLAT_DARK] += 2
-    
-    # Find winning type
-    # Sort by score descending, then by preference order BIAS > DARK > FLAT > LIGHT > FLAT_DARK
-    preference_order = [ImageType.BIAS, ImageType.DARK, ImageType.FLAT, ImageType.LIGHT, ImageType.FLAT_DARK]
-    
-    sorted_types = sorted(evidence.items(), key=lambda x: (-x[1], preference_order.index(x[0])))
-    winning_type, winning_score = sorted_types[0]
-    _, second_score = sorted_types[1]
-    
-    if winning_score == 0:
+    # Fallback: if stats unavailable, use exposure-time-only classification
+    if px_range is None or px_avg is None:
+        if exp is not None:
+            if exp < 0.1:
+                return ImageType.BIAS, 0.80
+            elif exp > 30:
+                if mean is not None and mean < 20:
+                    return ImageType.DARK, 0.70
+                else:
+                    return ImageType.LIGHT, 0.70
         return ImageType.UNKNOWN, 0.0
     
-    # Confidence: winning_score / (winning_score + second_score), clamped 0.0-0.99
-    if second_score > 0:
-        confidence = min(winning_score / (winning_score + second_score), 0.99)
-    else:
-        confidence = 0.99 if winning_score > 0 else 0.0
+    # Decision tree - first match wins
     
-    return winning_type, confidence
+    # BIAS: very low range, very low average, short/no exposure
+    if px_range < 20 and px_avg < 10 and (exp is None or exp < 0.1):
+        # Clear bias: near-zero range and average
+        confidence = min(0.7 + (px_range / 50.0), 0.95)
+        return ImageType.BIAS, confidence
+    
+    # FLAT_DARK: low range, dark, but short exposure like a flat
+    if px_range < 25 and px_avg < 15 and exp is not None and 0.1 <= exp <= 20:
+        confidence = min(0.6 + (15 - px_avg) / 30.0, 0.90)
+        return ImageType.FLAT_DARK, confidence
+    
+    # DARK: low range, dark, long exposure
+    if px_range < 40 and px_avg < 20 and exp is not None and exp > 0.5:
+        confidence = min(0.5 + (20 - px_avg) / 40.0, 0.90)
+        return ImageType.DARK, confidence
+    
+    # FLAT: both brightest and darkest areas are bright (high average)
+    if px_avg > 60 and px_range > 15:
+        confidence = min(0.6 + (px_avg - 60) / 100.0, 0.95)
+        return ImageType.FLAT, confidence
+    
+    # LIGHT: huge range (dark sky to bright stars), but average stays low-moderate
+    if px_range > 60 and px_avg < 80:
+        confidence = min(0.5 + (px_range - 60) / 150.0, 0.95)
+        return ImageType.LIGHT, confidence
+    
+    # No match - unknown
+    return ImageType.UNKNOWN, 0.0
 
 
 def get_summary(results: List[ImageMetadata]) -> dict:
