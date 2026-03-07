@@ -39,8 +39,8 @@ class AstroSorterApp(ctk.CTk):
         super().__init__()
         
         self.title(f"AstroSorter v{VERSION}")
-        self.geometry("1600x900")
         self.minsize(1200, 700)
+        self._center_window(1200, 700)
         
         # Set app icon
         self._set_icon()
@@ -66,9 +66,7 @@ class AstroSorterApp(ctk.CTk):
         
         self._setup_ui()
         
-        # Center window after UI is set up
-        self.update_idletasks()
-        self._center_window()
+
     
     def _setup_ui(self):
         self.grid_columnconfigure(1, weight=1)
@@ -607,31 +605,13 @@ class AstroSorterApp(ctk.CTk):
                     print(f"Failed to set icon {icon_file}: {e}")
                     pass
     
-    def _center_window(self):
-        """Center the window on the screen"""
-        self.update_idletasks()
-        
-        # Get screen dimensions
+    def _center_window(self, win_width: int = 1200, win_height: int = 700):
+        """Center the window on screen at the given size"""
         screen_width = self.winfo_screenwidth()
         screen_height = self.winfo_screenheight()
         
-        # Get configured window size
-        win_width = 1600
-        win_height = 900
-        
-        # Try to get actual window size
-        try:
-            actual_width = self.winfo_width()
-            actual_height = self.winfo_height()
-            if actual_width > 0 and actual_height > 0:
-                win_width = actual_width
-                win_height = actual_height
-        except:
-            pass
-        
-        # Calculate center position
-        x = (screen_width - win_width) // 2
-        y = (screen_height - win_height) // 2
+        x = max(0, (screen_width - win_width) // 2)
+        y = max(0, (screen_height - win_height) // 2)
         
         self.geometry(f"{win_width}x{win_height}+{x}+{y}")
     
