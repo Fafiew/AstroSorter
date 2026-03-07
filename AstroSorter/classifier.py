@@ -178,7 +178,7 @@ def classify_directory(directory: str, recursive: bool = True, progress_callback
         fn = m.filename.upper()
         
         # Check filename for type hints
-        if 'LIGHT' in fn or 'L_' in fn or '_L.' in fn:
+        if 'LIGHT' in fn or 'L_' in fn or '_L.' in fn or 'NGC' in fn or 'M42' in fn or 'IC' in fn:
             m.classified_type = ImageType.LIGHT
             m.confidence = 0.99
         elif 'DARK' in fn or 'D_' in fn or '_D.' in fn:
@@ -207,100 +207,119 @@ def classify_directory(directory: str, recursive: bool = True, progress_callback
             iso_groups[iso_key] = []
         iso_groups[iso_key].append(m)
     
-    # Classify each ISO group using exposure + mean
+    # Classify each ISO group using exposure time + mean
     for iso_key, images in iso_groups.items():
         if not images:
             continue
         
-        # Get exposure times and means
+        # Get statistics
         has_exposure = [m for m in images if m.exposure_time is not None]
         has_mean = [m for m in images if m.mean is not None]
         
         if not has_exposure and not has_mean:
-            # Nothing to work with
             for m in images:
                 m.classified_type = ImageType.UNKNOWN
                 m.confidence = 0.0
             continue
         
-        # Classify by exposure time (primary factor)
-        for m in images:
-            # BIAS: Very short exposure (<0.01s) 
-            if m.exposure_time and m.exposure_time < 0.01:
-                m.classified_type = ImageType.BIAS
-                m.confidence = 0.95
+        # Calculate group statistics for comparison
+        means = [m.mean for m in images if m.mean is not None]
+        exposures = [m.exposure_time for m in images if m.exposure_time is not None]
         
-        # Get bias images to compare against
+        group_mean = sum(means) / len(means) if means else 0
+        group_std = (sum((x - group_mean) ** 2 for x in means) / len(means)) ** 0.5 if means else 0
+        min_exposure = min(exposures) if exposures else 0
+        max_exposure = max(exposures) if exposures else 0
+        
+        # Classify by EXPOSURE TIME (primary factor):
+        # - < 0.01s = BIAS
+        # - 0.01-1s = could be FLAT or FLAT_DARK
+        # - > 1s = could be LIGHT or DARK
+        
+        for m in images:
+            exp = m.exposure_time
+            
+            if exp is not None:
+                # BIAS: Very short exposure (< 0.01s / 10ms)
+                if exp < 0.01:
+                    m.classified_type = ImageType.BIAS
+                    m.confidence = 0.95
+                # FLAT: Short exposure (0.01s to 1s) with moderate mean
+                elif exp < 1.0:
+                    # Flats have specific mean range (typically 30-80% of max)
+                    if m.mean is not None:
+                        max_possible = 255  # 8-bit
+                        mean_ratio = m.mean / max_possible
+                        
+                        # Flats should be moderately bright (15-90% of max)
+                        if 0.15 < mean_ratio < 0.90:
+                            m.classified_type = ImageType.FLAT
+                            m.confidence = 0.8
+                        # Very dark short exposure = flat-dark
+                        elif mean_ratio < 0.15:
+                            m.classified_type = ImageType.FLAT_DARK
+                            m.confidence = 0.7
+                        else:
+                            # Very bright short exposure - could be light with short sub
+                            # Check if it's the brightest in the group
+                            if m.mean > group_mean + group_std:
+                                m.classified_type = ImageType.LIGHT
+                                m.confidence = 0.6
+                            else:
+                                m.classified_type = ImageType.FLAT
+                                m.confidence = 0.5
+                    else:
+                        # No mean data - default short exposure to flat
+                        m.classified_type = ImageType.FLAT
+                        m.confidence = 0.5
+                # LIGHT or DARK: Longer exposure (> 1s)
+                else:
+                    if m.mean is not None:
+                        # Compare to group mean
+                        if m.mean > group_mean:
+                            m.classified_type = ImageType.LIGHT
+                            m.confidence = 0.8
+                        else:
+                            m.classified_type = ImageType.DARK
+                            m.confidence = 0.75
+                    else:
+                        # No mean - default to light (more common)
+                        m.classified_type = ImageType.LIGHT
+                        m.confidence = 0.5
+            else:
+                # No exposure data - use mean only
+                if m.mean is not None:
+                    if m.mean > group_mean:
+                        m.classified_type = ImageType.LIGHT
+                        m.confidence = 0.6
+                    else:
+                        m.classified_type = ImageType.DARK
+                        m.confidence = 0.6
+                else:
+                    m.classified_type = ImageType.UNKNOWN
+                    m.confidence = 0.0
+        
+        # Refinement: Use bias frames as reference if available
         bias_images = [m for m in images if m.classified_type == ImageType.BIAS]
         non_bias = [m for m in images if m.classified_type != ImageType.BIAS]
         
-        if not bias_images:
-            # No bias frames - use exposure time to separate
-            # FLAT: Short exposure (<0.5s), typically used for flats
-            # LIGHT: Longer exposures
-            for m in non_bias:
-                if m.exposure_time and m.exposure_time < 0.5:
-                    # Check mean - flats should have moderate brightness
-                    if m.mean and 20 < m.mean < 200:
-                        m.classified_type = ImageType.FLAT
-                        m.confidence = 0.7
-                    else:
-                        m.classified_type = ImageType.FLAT
-                        m.confidence = 0.5
-                else:
-                    # Longer exposure = likely light
-                    m.classified_type = ImageType.LIGHT
-                    m.confidence = 0.5
-        else:
-            # We have bias frames - use them as reference
+        if bias_images:
             bias_mean = sum(m.mean for m in bias_images if m.mean) / max(1, len([m for m in bias_images if m.mean]))
-            bias_exposure = max(m.exposure_time for m in bias_images if m.exposure_time) if any(m.exposure_time for m in bias_images) else 0
             
             for m in non_bias:
-                if m.exposure_time and m.exposure_time < 0.5:
-                    # Short exposure - could be flat or dark
-                    if m.mean and m.mean < bias_mean * 1.5:
-                        # Very similar to bias = flat-dark
-                        m.classified_type = ImageType.FLAT_DARK
-                        m.confidence = 0.7
-                    else:
-                        # Moderate brightness = flat
+                # If significantly brighter than bias, it's likely a light
+                if m.mean and m.mean > bias_mean * 3:
+                    m.classified_type = ImageType.LIGHT
+                    m.confidence = max(m.confidence, 0.85)
+                # If slightly brighter than bias, could be flat
+                elif m.mean and bias_mean < m.mean < bias_mean * 3:
+                    if m.classified_type != ImageType.FLAT:
                         m.classified_type = ImageType.FLAT
-                        m.confidence = 0.7
-                else:
-                    # Longer exposure
-                    if m.mean and m.mean > bias_mean * 2:
-                        # Much brighter than bias = light
-                        m.classified_type = ImageType.LIGHT
-                        m.confidence = 0.85
-                    else:
-                        # Similar to bias or darker = dark
-                        m.classified_type = ImageType.DARK
-                        m.confidence = 0.8
-        
-        # If still unclassified, use mean-based heuristic with ISO context
-        still_unclassified = [m for m in images if m.classified_type == ImageType.UNKNOWN]
-        if still_unclassified and has_mean:
-            means = [m.mean for m in images if m.mean is not None]
-            if means:
-                mean_mean = sum(means) / len(means)
-                std_mean = (sum((x - mean_mean) ** 2 for x in means) / len(means)) ** 0.5
-                
-                for m in still_unclassified:
-                    if m.mean is not None:
-                        # Z-score based classification
-                        z = (m.mean - mean_mean) / max(std_mean, 1)
-                        
-                        if z > 1:
-                            m.classified_type = ImageType.LIGHT
-                            m.confidence = 0.6
-                        elif z < -1:
-                            m.classified_type = ImageType.DARK
-                            m.confidence = 0.6
-                        else:
-                            # Near average - default to light (most common)
-                            m.classified_type = ImageType.LIGHT
-                            m.confidence = 0.4
+                        m.confidence = max(m.confidence, 0.7)
+                # If similar to or darker than bias, could be dark
+                elif m.mean and m.mean <= bias_mean:
+                    m.classified_type = ImageType.DARK
+                    m.confidence = max(m.confidence, 0.8)
     
     return results
 
