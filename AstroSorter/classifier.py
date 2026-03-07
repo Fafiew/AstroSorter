@@ -41,6 +41,8 @@ class ImageMetadata:
     mean: Optional[float] = None
     std: Optional[float] = None
     max_val: Optional[float] = None
+    min_val: Optional[float] = None
+    range_val: Optional[float] = None
     
     classified_type: ImageType = ImageType.UNKNOWN
     confidence: float = 0.0
@@ -58,49 +60,88 @@ def read_exif(filepath: str) -> dict:
     return result
 
 
-def transform_mean(raw_mean: float) -> float:
-    """Transform mean brightness to exaggerate differences between image types.
+def transform_mean(raw_mean: float, min_val: float, max_val: float, range_val: float) -> float:
+    """Transform brightness values to exaggerate differences between image types.
     
     Astrophotography reality:
-    - Bias: ~0 (pitch black, shortest exposure)
-    - Dark: ~0-5 (pitch black, same exposure as lights)
-    - Light: ~20-60 (dark sky + bright stars, average is darker)
-    - Flat: ~80-180 (uniform brightness, histogram peak at 1/2 to 1/3)
+    - Bias: ~0 (pitch black), range ~0 (no contrast)
+    - Dark: ~0-5 (pitch black), range ~0-10 (low contrast)  
+    - Light: min near 0 (dark sky), max near 255 (bright stars), high range
+    - Flat: min ~30-80, max ~150-255, average bright, moderate-high range
     
-    This function transforms to make classification clear:
-    - Bias/Dark → near 0
-    - Light → moderate (20-60)  
-    - Flat → high (80+)
+    This function uses min, max, and range to classify:
+    - Bias/Dark: min near 0, range very low → output ~0
+    - Light: min near 0, max can be bright → output based on max/range
+    - Flat: min and max both bright → output high
     """
     if raw_mean is None:
         return None
     
-    if raw_mean < 1:
-        # Pitch black - bias frames
-        return raw_mean * 0.3  # Keep near 0
-    elif raw_mean < 5:
-        # Very dark - dark frames  
-        return raw_mean * 0.6  # Keep low (1-3)
-    elif raw_mean < 20:
-        # Dark - likely light frames (dark sky with stars)
-        return 3 + raw_mean * 1.2  # ~3-27
-    elif raw_mean < 60:
-        # Light frames (brighter sky or more stars)
-        return 20 + (raw_mean - 20) * 1.5  # ~20-80
-    elif raw_mean < 120:
-        # Medium brightness - flats or bright lights
-        return 60 + (raw_mean - 60) * 2  # ~60-180
-    else:
-        # Very bright - likely flats
-        return 100 + (raw_mean - 120) * 1.5  # 100+
+    # Default if stats unavailable
+    if min_val is None or max_val is None or range_val is None:
+        return raw_mean
+    
+    # Handle edge cases
+    if range_val < 1:
+        # Very low range - likely bias or dark (uniform black)
+        if raw_mean < 5:
+            return raw_mean * 0.3  # Keep near 0
+        else:
+            return raw_mean * 0.5  # Keep low
+    
+    # Calculate normalized brightness metrics
+    # low_ratio: what fraction is in the dark end
+    low_ratio = min_val / 255.0  # Higher = more dark content
+    
+    # Bright content ratio
+    bright_ratio = max_val / 255.0  # Higher = has bright content
+    
+    # Mid-tone presence (content in middle brightness)
+    mid_ratio = 1.0 - low_ratio - bright_ratio
+    
+    # Classification based on these metrics
+    
+    # Case 1: Very dark images (bias/dark frames)
+    if max_val < 10:
+        return min_val * 0.5  # Keep near 0
+    
+    # Case 2: Dark with some bright stars (lights)
+    # - min is low (dark sky)
+    # - max is high (bright stars)
+    # - range is high
+    if low_ratio > 0.3 and bright_ratio > 0.3 and range_val > 50:
+        # Has both dark and bright content - likely LIGHT frames
+        return 20 + (bright_ratio * 60)  # ~30-80
+    
+    # Case 3: Uniform bright (flats)
+    # - min is moderate to high
+    # - range is moderate
+    if min_val > 30 and range_val < 100:
+        # Uniform brightness - likely FLAT
+        return min_val + 50  # Push higher
+    
+    # Case 4: Very bright uniform (flats)
+    if min_val > 80:
+        return min_val + 30  # Keep high
+    
+    # Case 5: Low contrast dark (dark/bias)
+    if range_val < 20:
+        if raw_mean < 10:
+            return raw_mean * 0.5  # Near black
+        else:
+            return raw_mean * 0.7  # Keep low
+    
+    # Default fallback
+    return raw_mean
 
 
 def get_stats(filepath: str, ext: str) -> dict:
-    result = {'mean': None, 'std': None, 'max': None}
+    result = {'mean': None, 'std': None, 'max': None, 'min': None, 'range': None}
     try:
         if ext in RAW_EXTENSIONS:
             try:
                 import rawpy
+                import numpy as np
                 with rawpy.imread(filepath) as raw:
                     # Use the raw image data directly (not postprocessed)
                     data = raw.raw_image_visible.astype(np.float32)
@@ -114,9 +155,12 @@ def get_stats(filepath: str, ext: str) -> dict:
                     
                     data_scaled = data * scale_factor
                     
+                    # Calculate stats including min/max for brightness analysis
                     result['mean'] = float(np.mean(data_scaled))
                     result['std'] = float(np.std(data_scaled))
                     result['max'] = float(np.minimum(np.max(data_scaled), 255))
+                    result['min'] = float(np.min(data_scaled))
+                    result['range'] = result['max'] - result['min']
                     return result
             except ImportError:
                 # rawpy not available, fall through to PIL
@@ -126,6 +170,8 @@ def get_stats(filepath: str, ext: str) -> dict:
                 return result
         
         with Image.open(filepath) as img:
+            import numpy as np
+            
             # Handle different bit depths properly
             if img.mode == 'I;16':
                 # 16-bit grayscale - convert properly
@@ -156,6 +202,8 @@ def get_stats(filepath: str, ext: str) -> dict:
             result['mean'] = float(np.mean(arr))
             result['std'] = float(np.std(arr))
             result['max'] = float(np.minimum(np.max(arr), 255))
+            result['min'] = float(np.min(arr))
+            result['range'] = result['max'] - result['min']
     except Exception as e:
         print(f"[STATS] Failed to process {filepath}: {e}")
     return result
@@ -220,14 +268,17 @@ def process_image(filepath: str) -> ImageMetadata:
             m.iso = finfo['iso']
         
         stats = get_stats(filepath, ext)
-        raw_mean = stats['mean']
         
-        # Transform mean to exaggerate differences between image types
-        # This makes classification more accurate and values more distinctive
-        m.mean = transform_mean(raw_mean)
+        # Use min, max, and range for better classification
+        # Transform to exaggerate differences between image types
+        m.min_val = stats['min']
+        m.max_val = stats['max']
+        m.range_val = stats['range']
+        
+        # New classification using min, max, range
+        m.mean = transform_mean(stats['mean'], stats['min'], stats['max'], stats['range'])
         
         m.std = stats['std']
-        m.max_val = stats['max']
         
     except Exception as e:
         print(f"Error: {filepath}: {e}")
@@ -348,6 +399,19 @@ def classify_directory(directory: str, recursive: bool = True, progress_callback
                     elif m.mean >= 80:
                         # Bright - flats
                         evidence[ImageType.FLAT] += 4
+                
+                # Evidence 4: Using min/max/range (the actual algorithm)
+                if m.min_val is not None and m.range_val is not None:
+                    # Dark/Bias: range very low (uniform black)
+                    if m.range_val < 15:
+                        evidence[ImageType.BIAS] += 3
+                        evidence[ImageType.DARK] += 2
+                    # Light: has both dark (sky) and bright (stars) - high range
+                    elif m.range_val > 80 and m.min_val < 50:
+                        evidence[ImageType.LIGHT] += 3
+                    # Flats: moderate range but minimum is bright
+                    elif m.min_val > 40 and m.range_val < 100:
+                        evidence[ImageType.FLAT] += 3
             
             # Find best evidence
             best_type = max(evidence, key=evidence.get)
