@@ -173,31 +173,25 @@ def classify_directory(directory: str, recursive: bool = True, progress_callback
         if progress_callback:
             progress_callback(i + 1, len(files), f)
     
-    # First pass: Classify based on filename hints (most reliable)
+    # Collect all filename hints FIRST
     for m in results:
         fn = m.filename.upper()
         
         # Check filename for type hints
-        if 'LIGHT' in fn or 'L_' in fn or '_L.' in fn or 'NGC' in fn or 'M42' in fn or 'IC' in fn:
-            m.classified_type = ImageType.LIGHT
-            m.confidence = 0.99
-        elif 'DARK' in fn or 'D_' in fn or '_D.' in fn:
-            m.classified_type = ImageType.DARK
-            m.confidence = 0.99
-        elif 'FLAT' in fn or 'F_' in fn or '_F.' in fn:
-            m.classified_type = ImageType.FLAT
-            m.confidence = 0.99
-        elif 'BIAS' in fn or 'OFFSET' in fn or 'B_' in fn or '_B.' in fn:
-            m.classified_type = ImageType.BIAS
-            m.confidence = 0.99
+        m._filename_hint = None
+        if 'FLAT' in fn or 'F_' in fn or '_F.' in fn:
+            m._filename_hint = ImageType.FLAT
         elif 'FLAT_DARK' in fn or 'FD_' in fn:
-            m.classified_type = ImageType.FLAT_DARK
-            m.confidence = 0.99
+            m._filename_hint = ImageType.FLAT_DARK
+        elif 'BIAS' in fn or 'OFFSET' in fn or 'B_' in fn or '_B.' in fn:
+            m._filename_hint = ImageType.BIAS
+        elif 'DARK' in fn or 'D_' in fn or '_D.' in fn:
+            m._filename_hint = ImageType.DARK
+        elif 'LIGHT' in fn or 'L_' in fn or '_L.' in fn or 'NGC' in fn or 'M42' in fn or 'IC' in fn:
+            m._filename_hint = ImageType.LIGHT
     
-    # Get images still unclassified
-    unclassified = [m for m in results if m.classified_type == ImageType.UNKNOWN]
-    if not unclassified:
-        return results
+    # Get images to classify (those without filename hints or all for scoring)
+    unclassified = [m for m in results if m._filename_hint is None]
     
     # Group by ISO for fair comparison
     iso_groups: Dict[int, List[ImageMetadata]] = {}
@@ -207,119 +201,80 @@ def classify_directory(directory: str, recursive: bool = True, progress_callback
             iso_groups[iso_key] = []
         iso_groups[iso_key].append(m)
     
-    # Classify each ISO group using exposure time + mean
+    # Classify each ISO group using evidence-based scoring
     for iso_key, images in iso_groups.items():
         if not images:
-            continue
-        
-        # Get statistics
-        has_exposure = [m for m in images if m.exposure_time is not None]
-        has_mean = [m for m in images if m.mean is not None]
-        
-        if not has_exposure and not has_mean:
-            for m in images:
-                m.classified_type = ImageType.UNKNOWN
-                m.confidence = 0.0
             continue
         
         # Calculate group statistics for comparison
         means = [m.mean for m in images if m.mean is not None]
         exposures = [m.exposure_time for m in images if m.exposure_time is not None]
         
-        group_mean = sum(means) / len(means) if means else 0
-        group_std = (sum((x - group_mean) ** 2 for x in means) / len(means)) ** 0.5 if means else 0
-        min_exposure = min(exposures) if exposures else 0
-        max_exposure = max(exposures) if exposures else 0
+        if not means and not exposures:
+            for m in images:
+                m.classified_type = ImageType.UNKNOWN
+                m.confidence = 0.0
+            continue
         
-        # Classify by EXPOSURE TIME (primary factor):
-        # - < 0.01s = BIAS
-        # - 0.01-1s = could be FLAT or FLAT_DARK
-        # - > 1s = could be LIGHT or DARK
+        group_mean = sum(means) / len(means) if means else 128
+        group_std = (sum((x - group_mean) ** 2 for x in means) / len(means)) ** 0.5 if means else 50
         
+        # Calculate evidence scores for each image
         for m in images:
+            evidence = {ImageType.LIGHT: 0, ImageType.DARK: 0, ImageType.FLAT: 0, 
+                      ImageType.BIAS: 0, ImageType.FLAT_DARK: 0}
+            
+            # Evidence 1: Exposure time
             exp = m.exposure_time
-            
             if exp is not None:
-                # BIAS: Very short exposure (< 0.01s / 10ms)
-                if exp < 0.01:
-                    m.classified_type = ImageType.BIAS
-                    m.confidence = 0.95
-                # FLAT: Short exposure (0.01s to 1s) with moderate mean
-                elif exp < 1.0:
-                    # Flats have specific mean range (typically 30-80% of max)
-                    if m.mean is not None:
-                        max_possible = 255  # 8-bit
-                        mean_ratio = m.mean / max_possible
-                        
-                        # Flats should be moderately bright (15-90% of max)
-                        if 0.15 < mean_ratio < 0.90:
-                            m.classified_type = ImageType.FLAT
-                            m.confidence = 0.8
-                        # Very dark short exposure = flat-dark
-                        elif mean_ratio < 0.15:
-                            m.classified_type = ImageType.FLAT_DARK
-                            m.confidence = 0.7
-                        else:
-                            # Very bright short exposure - could be light with short sub
-                            # Check if it's the brightest in the group
-                            if m.mean > group_mean + group_std:
-                                m.classified_type = ImageType.LIGHT
-                                m.confidence = 0.6
-                            else:
-                                m.classified_type = ImageType.FLAT
-                                m.confidence = 0.5
-                    else:
-                        # No mean data - default short exposure to flat
-                        m.classified_type = ImageType.FLAT
-                        m.confidence = 0.5
-                # LIGHT or DARK: Longer exposure (> 1s)
+                if exp < 0.01:  # < 10ms = very likely bias
+                    evidence[ImageType.BIAS] += 3
+                elif exp < 0.1:  # < 100ms = likely flat
+                    evidence[ImageType.FLAT] += 2
+                elif exp > 1.0:  # > 1s = likely light
+                    evidence[ImageType.LIGHT] += 2
                 else:
-                    if m.mean is not None:
-                        # Compare to group mean
-                        if m.mean > group_mean:
-                            m.classified_type = ImageType.LIGHT
-                            m.confidence = 0.8
-                        else:
-                            m.classified_type = ImageType.DARK
-                            m.confidence = 0.75
-                    else:
-                        # No mean - default to light (more common)
-                        m.classified_type = ImageType.LIGHT
-                        m.confidence = 0.5
-            else:
-                # No exposure data - use mean only
-                if m.mean is not None:
-                    if m.mean > group_mean:
-                        m.classified_type = ImageType.LIGHT
-                        m.confidence = 0.6
-                    else:
-                        m.classified_type = ImageType.DARK
-                        m.confidence = 0.6
-                else:
-                    m.classified_type = ImageType.UNKNOWN
-                    m.confidence = 0.0
-        
-        # Refinement: Use bias frames as reference if available
-        bias_images = [m for m in images if m.classified_type == ImageType.BIAS]
-        non_bias = [m for m in images if m.classified_type != ImageType.BIAS]
-        
-        if bias_images:
-            bias_mean = sum(m.mean for m in bias_images if m.mean) / max(1, len([m for m in bias_images if m.mean]))
+                    evidence[ImageType.FLAT] += 1
             
-            for m in non_bias:
-                # If significantly brighter than bias, it's likely a light
-                if m.mean and m.mean > bias_mean * 3:
-                    m.classified_type = ImageType.LIGHT
-                    m.confidence = max(m.confidence, 0.85)
-                # If slightly brighter than bias, could be flat
-                elif m.mean and bias_mean < m.mean < bias_mean * 3:
-                    if m.classified_type != ImageType.FLAT:
-                        m.classified_type = ImageType.FLAT
-                        m.confidence = max(m.confidence, 0.7)
-                # If similar to or darker than bias, could be dark
-                elif m.mean and m.mean <= bias_mean:
-                    m.classified_type = ImageType.DARK
-                    m.confidence = max(m.confidence, 0.8)
+            # Evidence 2: Mean brightness vs group
+            if m.mean is not None:
+                z = (m.mean - group_mean) / max(group_std, 1)
+                
+                if z > 1.5:  # Much brighter than average
+                    evidence[ImageType.LIGHT] += 2
+                    evidence[ImageType.DARK] -= 1
+                elif z > 0.5:
+                    evidence[ImageType.LIGHT] += 1
+                elif z < -1.5:  # Much darker than average
+                    evidence[ImageType.DARK] += 2
+                    evidence[ImageType.LIGHT] -= 1
+                elif z < -0.5:
+                    evidence[ImageType.DARK] += 1
+                
+                # Evidence 3: Absolute brightness
+                if m.mean < 20:
+                    evidence[ImageType.BIAS] += 1
+                    evidence[ImageType.FLAT_DARK] += 1
+                elif 30 < m.mean < 200:
+                    evidence[ImageType.FLAT] += 1
+            
+            # Find best evidence
+            best_type = max(evidence, key=evidence.get)
+            best_score = evidence[best_type]
+            
+            if best_score > 0:
+                m.classified_type = best_type
+                # Normalize confidence: score / max possible
+                m.confidence = min(best_score / 5.0, 0.9)
+            else:
+                m.classified_type = ImageType.UNKNOWN
+                m.confidence = 0.0
+    
+    # Now apply filename hints with HIGH confidence (they're user-provided)
+    for m in results:
+        if m._filename_hint is not None:
+            m.classified_type = m._filename_hint
+            m.confidence = 0.99  # Filename hints are most reliable
     
     return results
 
