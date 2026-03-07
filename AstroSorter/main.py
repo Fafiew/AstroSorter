@@ -216,8 +216,8 @@ class AstroSorterApp(ctk.CTk):
         ctk.CTkLabel(card, text="Supports: CR2, CR3, NEF, ARW, RAF, DNG, FITS, TIFF, JPG, PNG",
                     text_color="#606080", font=("Segoe UI", 10)).pack(pady=(20, 40))
     
-    def _preview_image(self, filepath: str):
-        """Load and return a PIL Image from filepath"""
+    def _preview_image(self, filepath: str, max_size: int = 800):
+        """Load and return a PIL Image from filepath, downscaled for preview"""
         img = None
         ext = Path(filepath).suffix.lower()
         
@@ -226,7 +226,9 @@ class AstroSorterApp(ctk.CTk):
                 try:
                     import rawpy
                     with rawpy.imread(filepath) as raw:
-                        rgb = raw.postprocess(use_camera_wb=True, no_auto_bright=True)
+                        # Downscale during RAW decode for speed
+                        rgb = raw.postprocess(use_camera_wb=True, no_auto_bright=True, 
+                                             output_bps=8)
                         img = PILImage.fromarray(rgb)
                 except ImportError:
                     # rawpy not available
@@ -236,6 +238,12 @@ class AstroSorterApp(ctk.CTk):
             
             if img is None:
                 img = PILImage.open(filepath)
+            
+            # Downscale if too large (for preview speed)
+            if img.width > max_size or img.height > max_size:
+                ratio = min(max_size / img.width, max_size / img.height)
+                new_size = (int(img.width * ratio), int(img.height * ratio))
+                img = img.resize(new_size, PILImage.Resampling.LANCZOS)
                 
         except Exception as e:
             messagebox.showerror("Error", f"Cannot load image: {str(e)}")
