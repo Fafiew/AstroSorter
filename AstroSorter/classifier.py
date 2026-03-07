@@ -65,14 +65,21 @@ def get_stats(filepath: str, ext: str) -> dict:
             try:
                 import rawpy
                 with rawpy.imread(filepath) as raw:
+                    # Use the raw image data directly (not postprocessed)
                     data = raw.raw_image_visible.astype(np.float32)
-                    raw_max = float(np.iinfo(raw.raw_image_visible.dtype).max)
-                    # Normalize to 0-255 range (RAW files are 12 or 14-bit)
-                    if raw_max > 255:
-                        data = (data / raw_max) * 255.0
-                    result['mean'] = float(np.mean(data))
-                    result['std'] = float(np.std(data))
-                    result['max'] = float(np.minimum(np.max(data), 255))
+                    
+                    # Get bit depth info
+                    dtype = raw.raw_image_visible.dtype
+                    max_raw = float(np.iinfo(dtype).max)
+                    
+                    # Normalize to 0-255 based on max value for this bit depth
+                    scale_factor = 255.0 / max_raw
+                    
+                    data_scaled = data * scale_factor
+                    
+                    result['mean'] = float(np.mean(data_scaled))
+                    result['std'] = float(np.std(data_scaled))
+                    result['max'] = float(np.minimum(np.max(data_scaled), 255))
                     return result
             except ImportError:
                 # rawpy not available, fall through to PIL
@@ -82,13 +89,35 @@ def get_stats(filepath: str, ext: str) -> dict:
                 return result
         
         with Image.open(filepath) as img:
-            # Handle 16-bit TIFFs
+            # Handle different bit depths properly
             if img.mode == 'I;16':
+                # 16-bit grayscale - convert properly
+                import numpy as np
                 arr = np.array(img, dtype=np.float32)
-                arr = (arr / 65535.0) * 255.0  # Normalize 16-bit to 0-255
-            else:
+                # Normalize to 0-255 based on actual range in the image
+                arr_min, arr_max = arr.min(), arr.max()
+                if arr_max > arr_min:
+                    arr = ((arr - arr_min) / (arr_max - arr_min)) * 255.0
+                else:
+                    arr = arr - arr_min
+            elif img.mode == 'I':
+                # 32-bit grayscale
+                import numpy as np
+                arr = np.array(img, dtype=np.float32)
+                arr_min, arr_max = arr.min(), arr.max()
+                if arr_max > arr_min:
+                    arr = ((arr - arr_min) / (arr_max - arr_min)) * 255.0
+                else:
+                    arr = arr - arr_min
+            elif img.mode in ('RGB', 'RGBA', 'L'):
+                # 8-bit images
                 gray = img.convert('L')
                 arr = np.array(gray, dtype=np.float32)
+            else:
+                # Fallback
+                gray = img.convert('L')
+                arr = np.array(gray, dtype=np.float32)
+            
             result['mean'] = float(np.mean(arr))
             result['std'] = float(np.std(arr))
             result['max'] = float(np.minimum(np.max(arr), 255))
