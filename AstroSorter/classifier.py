@@ -43,6 +43,8 @@ class ImageMetadata:
     max_val: Optional[float] = None
     min_val: Optional[float] = None
     range_val: Optional[float] = None
+    p1: Optional[float] = None
+    p99: Optional[float] = None
     
     classified_type: ImageType = ImageType.UNKNOWN
     confidence: float = 0.0
@@ -61,7 +63,7 @@ def read_exif(filepath: str) -> dict:
 
 
 def get_stats(filepath: str, ext: str) -> dict:
-    result = {'mean': None, 'std': None, 'max': None, 'min': None, 'range': None}
+    result = {'mean': None, 'std': None, 'max': None, 'min': None, 'range': None, 'p1': None, 'p99': None}
     try:
         if ext in RAW_EXTENSIONS:
             try:
@@ -86,6 +88,8 @@ def get_stats(filepath: str, ext: str) -> dict:
                     result['max'] = float(np.minimum(np.max(data_scaled), 255))
                     result['min'] = float(np.min(data_scaled))
                     result['range'] = result['max'] - result['min']
+                    result['p1'] = float(np.percentile(data_scaled, 1))
+                    result['p99'] = float(np.percentile(data_scaled, 99))
                     return result
             except ImportError:
                 # rawpy not available, fall through to PIL
@@ -116,6 +120,8 @@ def get_stats(filepath: str, ext: str) -> dict:
                     result['max'] = float(np.minimum(np.max(data_scaled), 255))
                     result['min'] = float(np.min(data_scaled))
                     result['range'] = result['max'] - result['min']
+                    result['p1'] = float(np.percentile(data_scaled, 1))
+                    result['p99'] = float(np.percentile(data_scaled, 99))
                     return result
             except ImportError:
                 print(f"[FITS] astropy not installed for {filepath}")
@@ -158,6 +164,8 @@ def get_stats(filepath: str, ext: str) -> dict:
             result['max'] = float(np.minimum(np.max(arr), 255))
             result['min'] = float(np.min(arr))
             result['range'] = result['max'] - result['min']
+            result['p1'] = float(np.percentile(arr, 1))
+            result['p99'] = float(np.percentile(arr, 99))
     except Exception as e:
         print(f"[STATS] Failed to process {filepath}: {e}")
     return result
@@ -229,6 +237,8 @@ def process_image(filepath: str) -> ImageMetadata:
         m.range_val = stats['range']
         m.mean = stats['mean']  # Raw mean, not transformed
         m.std = stats['std']
+        m.p1 = stats.get('p1')
+        m.p99 = stats.get('p99')
         
     except Exception as e:
         print(f"Error: {filepath}: {e}")
